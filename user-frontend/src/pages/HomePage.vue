@@ -32,10 +32,14 @@
       </div>
     </section>
 
-    <!-- Ad slot -->
-    <AdSpace type="leaderboard" />
+    <!-- Ad top -->
+    <div class="flex justify-center">
+      <!-- <AdNative /> -->
+            <AdBanner300 />
+    </div>
 
     <!-- Latest Updates -->
+
     <section>
       <div class="flex items-center justify-between mb-3">
         <h2 class="section-title">Latest Updates</h2>
@@ -96,8 +100,11 @@
       </template>
     </section>
 
-    <!-- Ad slot -->
-    <AdSpace type="leaderboard" />
+
+    <!-- Ad slot after Recommendations -->
+    <div class="flex justify-center mt-4">
+            <AdNative />
+    </div>
 
     <!-- Recommendations -->
     <section>
@@ -152,7 +159,9 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { seriesApi } from '@/services/api'
-import AdSpace from '@/components/AdSpace.vue'
+import AdNative from '@/components/ads/AdNative.vue'
+import AdBanner300 from '@/components/ads/AdBanner300.vue'
+import { imgError, starText } from '@/utils/ratings'
 import type { Series, Chapter } from '@/services/api'
 
 interface LatestGroup { series: Series; chapters: Chapter[] }
@@ -216,21 +225,6 @@ function pickRecos() {
 }
 
 watch(activeGenre, pickRecos)
-
-function imgError(e: Event) { (e.target as HTMLImageElement).style.display = 'none' }
-
-function getStars(s: { id: string; view_count: number }): number {
-  let base = 3.0
-  if (s.view_count > 0) base = Math.min(4.5, 3.0 + Math.log10(s.view_count + 1) * 0.5)
-  let hash = 0
-  for (const c of s.id) hash = (hash * 31 + c.charCodeAt(0)) & 0xFF
-  return Math.min(5.0, parseFloat((base + (hash % 6) / 10).toFixed(1)))
-}
-
-function starText(s: { id: string; view_count: number }): string {
-  const r = getStars(s)
-  return '★'.repeat(Math.round(r)) + '☆'.repeat(5 - Math.round(r)) + ` ${r.toFixed(1)}`
-}
 
 async function loadPopular() {
   popularLoading.value = true

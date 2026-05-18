@@ -78,6 +78,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { seriesApi } from '@/services/api'
+import { imgError } from '@/utils/ratings'
 import type { Series } from '@/services/api'
 
 const PAGE_SIZE = 24
@@ -132,8 +133,6 @@ function goPage(p: number) {
   currentPage.value = Math.max(1, Math.min(p, totalPages.value))
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
-
-function imgError(e: Event) { (e.target as HTMLImageElement).style.display = 'none' }
 
 async function load() {
   loading.value = true

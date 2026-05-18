@@ -121,6 +121,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { seriesApi } from '@/services/api'
+import { imgError } from '@/utils/ratings'
 import type { Series } from '@/services/api'
 
 const route = useRoute()
@@ -163,7 +164,7 @@ function goPage(p: number) {
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-function imgError(e: Event) { (e.target as HTMLImageElement).style.display = 'none' }
+
 
 async function doSearch() {
   loading.value = true

@@ -69,19 +69,10 @@ func GetSeries(c *gin.Context) {
 // GetSeriesLatestChapters GET /api/series/:id/latest-chapters
 func GetSeriesLatestChapters(c *gin.Context) {
 	seriesID := c.Param("id")
-	chapters, err := repository.ListChaptersBySeries(c.Request.Context(), seriesID)
+	chapters, err := repository.LatestChaptersBySeries(c.Request.Context(), seriesID, 3)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-	// ListChaptersBySeries returns ASC — take last 3
-	n := len(chapters)
-	if n > 3 {
-		chapters = chapters[n-3:]
-	}
-	// Reverse so newest first
-	for i, j := 0, len(chapters)-1; i < j; i, j = i+1, j-1 {
-		chapters[i], chapters[j] = chapters[j], chapters[i]
 	}
 	c.JSON(http.StatusOK, gin.H{"data": chapters})
 }
@@ -162,10 +153,13 @@ func GetLatestUpdates(c *gin.Context) {
 		end = total
 	}
 
-	// Only fetch series info for this page's series (max `limit` GetItem calls)
+	// Batch-fetch all series on this page in a single BatchGetItem call.
+	pageIDs := seriesOrder[offset:end]
+	seriesMap, _ := repository.BatchGetSeriesByIDs(c.Request.Context(), pageIDs)
+
 	var result []*models.Chapter
-	for _, sid := range seriesOrder[offset:end] {
-		s, _ := repository.GetSeriesByID(c.Request.Context(), sid)
+	for _, sid := range pageIDs {
+		s := seriesMap[sid]
 		for _, ch := range seriesChapters[sid] {
 			ch.Series = s
 			result = append(result, ch)

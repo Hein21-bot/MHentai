@@ -31,6 +31,7 @@ export interface Chapter {
   series?: Series
   source_url?: string
   created_at: string
+  updated_at: string
 }
 
 export const seriesApi = {

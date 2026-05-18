@@ -35,6 +35,47 @@ func GetSeriesByID(ctx context.Context, id string) (*models.Series, error) {
 	return &s, nil
 }
 
+// BatchGetSeriesByIDs fetches multiple series by primary key in a single BatchGetItem call.
+// Returns a map of id → Series. Missing items are absent from the map (not an error).
+func BatchGetSeriesByIDs(ctx context.Context, ids []string) (map[string]*models.Series, error) {
+	if len(ids) == 0 {
+		return map[string]*models.Series{}, nil
+	}
+
+	keys := make([]map[string]types.AttributeValue, len(ids))
+	for i, id := range ids {
+		keys[i] = map[string]types.AttributeValue{
+			"id": &types.AttributeValueMemberS{Value: id},
+		}
+	}
+
+	result := make(map[string]*models.Series, len(ids))
+	remaining := keys
+
+	for len(remaining) > 0 {
+		out, err := database.Client.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{
+			RequestItems: map[string]types.KeysAndAttributes{
+				database.TableSeries: {Keys: remaining},
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range out.Responses[database.TableSeries] {
+			var s models.Series
+			if attributevalue.UnmarshalMap(item, &s) == nil {
+				result[s.ID] = &s
+			}
+		}
+		remaining = nil
+		if unprocessed, ok := out.UnprocessedKeys[database.TableSeries]; ok {
+			remaining = unprocessed.Keys
+		}
+	}
+
+	return result, nil
+}
+
 // GetSeriesBySlug fetches a series via the slug GSI.
 func GetSeriesBySlug(ctx context.Context, slug string) (*models.Series, error) {
 	out, err := database.Client.Query(ctx, &dynamodb.QueryInput{
@@ -60,31 +101,34 @@ func GetSeriesBySlug(ctx context.Context, slug string) (*models.Series, error) {
 }
 
 // GetSeriesBySourceURL scans the series table for a matching source URL.
+// Note: Limit is intentionally omitted — on a Scan, DynamoDB applies Limit before
+// FilterExpression, so Limit=1 would evaluate only one item and miss any non-first match.
 func GetSeriesBySourceURL(ctx context.Context, sourceURL string) (*models.Series, error) {
 	input := &dynamodb.ScanInput{
 		TableName:        aws.String(database.TableSeries),
-		FilterExpression: aws.String("#source_url = :source_url"),
-		ExpressionAttributeNames: map[string]string{
-			"#source_url": "source_url",
-		},
+		FilterExpression: aws.String("source_url = :source_url"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":source_url": &types.AttributeValueMemberS{Value: sourceURL},
 		},
-		Limit: aws.Int32(1),
 	}
-
-	out, err := database.Client.Scan(ctx, input)
-	if err != nil {
-		return nil, err
+	for {
+		out, err := database.Client.Scan(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		if len(out.Items) > 0 {
+			var s models.Series
+			if err = attributevalue.UnmarshalMap(out.Items[0], &s); err != nil {
+				return nil, err
+			}
+			return &s, nil
+		}
+		if out.LastEvaluatedKey == nil {
+			break
+		}
+		input.ExclusiveStartKey = out.LastEvaluatedKey
 	}
-	if len(out.Items) == 0 {
-		return nil, ErrNotFound
-	}
-	var s models.Series
-	if err = attributevalue.UnmarshalMap(out.Items[0], &s); err != nil {
-		return nil, err
-	}
-	return &s, nil
+	return nil, ErrNotFound
 }
 
 type ListSeriesParams struct {
@@ -99,126 +143,47 @@ type ListSeriesParams struct {
 type ListSeriesResult struct {
 	Items   []*models.Series
 	LastKey map[string]types.AttributeValue
-	Total   int // approximate from scan, 0 when using index queries
-}
-
-// ListSeries returns a paginated list of series. Uses a Scan for search/sort flexibility.
-func ListSeries(ctx context.Context, p ListSeriesParams) (*ListSeriesResult, error) {
-	if p.Limit <= 0 || p.Limit > 100 {
-		p.Limit = 24
-	}
-
-	// Build filter expression
-	filterExpr := ""
-	exprNames := map[string]string{}
-	exprVals := map[string]types.AttributeValue{}
-
-	if p.Status != "" {
-		filterExpr = "#status = :status"
-		exprNames["#status"] = "status"
-		exprVals[":status"] = &types.AttributeValueMemberS{Value: p.Status}
-	}
-	if p.Search != "" {
-		searchFilter := "contains(#title, :search)"
-		exprNames["#title"] = "title"
-		exprVals[":search"] = &types.AttributeValueMemberS{Value: p.Search}
-		if filterExpr != "" {
-			filterExpr += " AND " + searchFilter
-		} else {
-			filterExpr = searchFilter
-		}
-	}
-	if p.Language != "" {
-		langFilter := "#language = :language"
-		exprNames["#language"] = "language"
-		exprVals[":language"] = &types.AttributeValueMemberS{Value: p.Language}
-		if filterExpr != "" {
-			filterExpr += " AND " + langFilter
-		} else {
-			filterExpr = langFilter
-		}
-	}
-
-	// Scan the table (works for any filter/sort combination)
-	input := &dynamodb.ScanInput{
-		TableName: aws.String(database.TableSeries),
-	}
-	if filterExpr != "" {
-		input.FilterExpression = aws.String(filterExpr)
-		if len(exprNames) > 0 {
-			input.ExpressionAttributeNames = exprNames
-		}
-		input.ExpressionAttributeValues = exprVals
-	}
-	if p.LastKey != nil {
-		input.ExclusiveStartKey = p.LastKey
-	}
-
-	// Fetch enough items to sort client-side (DynamoDB Scan doesn't support ORDER BY)
-	// For production scale, use GSIs with pre-sorted data. For now, scan all and sort.
-	var allItems []*models.Series
-	var lastKey map[string]types.AttributeValue
-
-	for {
-		out, err := database.Client.Scan(ctx, input)
-		if err != nil {
-			return nil, err
-		}
-		for _, item := range out.Items {
-			var s models.Series
-			if err = attributevalue.UnmarshalMap(item, &s); err == nil {
-				allItems = append(allItems, &s)
-			}
-		}
-		lastKey = out.LastEvaluatedKey
-		if lastKey == nil {
-			break
-		}
-		// Continue scanning if we haven't exhausted the table
-		input.ExclusiveStartKey = lastKey
-	}
-
-	// Sort in-memory
-	sortSeries(allItems, p.SortBy)
-
-	total := len(allItems)
-
-	// Manual pagination after sort
-	start := 0
-	if p.LastKey != nil {
-		// Simple offset: not ideal but works for small-medium datasets
-		// For true cursor pagination with DynamoDB, store offset in cursor
-	}
-	end := start + p.Limit
-	if end > len(allItems) {
-		end = len(allItems)
-	}
-
-	var nextKey map[string]types.AttributeValue
-	if end < len(allItems) {
-		// Encode the next page start index as a synthetic last key
-		// (not a real DynamoDB key — we handle pagination in the handler via page offset)
-		nextKey = map[string]types.AttributeValue{
-			"_page_offset": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", end)},
-		}
-	}
-
-	return &ListSeriesResult{
-		Items:   allItems[start:end],
-		LastKey: nextKey,
-		Total:   total,
-	}, nil
+	Total   int
 }
 
 // ListSeriesPage returns a specific page of the sorted/filtered list.
+// Results are cached for 2 minutes keyed by (status, sort, search, language).
 func ListSeriesPage(ctx context.Context, p ListSeriesParams, page int) (*ListSeriesResult, error) {
-	if p.Limit <= 0 || p.Limit > 100 {
+	if p.Limit <= 0 || p.Limit > 500 {
 		p.Limit = 24
 	}
 	if page < 1 {
 		page = 1
 	}
 
+	key := listCacheKey(p)
+
+	allItems, cached := cacheGetList(key)
+	if !cached {
+		var err error
+		allItems, err = scanAllSeries(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		sortSeries(allItems, p.SortBy)
+		cacheSetList(key, allItems)
+	}
+
+	total := len(allItems)
+	offset := (page - 1) * p.Limit
+	if offset >= total {
+		return &ListSeriesResult{Items: []*models.Series{}, Total: total}, nil
+	}
+	end := offset + p.Limit
+	if end > total {
+		end = total
+	}
+
+	return &ListSeriesResult{Items: allItems[offset:end], Total: total}, nil
+}
+
+// scanAllSeries does the full DynamoDB scan with the given filters.
+func scanAllSeries(ctx context.Context, p ListSeriesParams) ([]*models.Series, error) {
 	filterExpr := ""
 	exprNames := map[string]string{}
 	exprVals := map[string]types.AttributeValue{}
@@ -254,9 +219,7 @@ func ListSeriesPage(ctx context.Context, p ListSeriesParams, page int) (*ListSer
 	}
 	if filterExpr != "" {
 		input.FilterExpression = aws.String(filterExpr)
-		if len(exprNames) > 0 {
-			input.ExpressionAttributeNames = exprNames
-		}
+		input.ExpressionAttributeNames = exprNames
 		input.ExpressionAttributeValues = exprVals
 	}
 
@@ -277,20 +240,7 @@ func ListSeriesPage(ctx context.Context, p ListSeriesParams, page int) (*ListSer
 		}
 		input.ExclusiveStartKey = out.LastEvaluatedKey
 	}
-
-	sortSeries(allItems, p.SortBy)
-	total := len(allItems)
-
-	offset := (page - 1) * p.Limit
-	end := offset + p.Limit
-	if offset >= total {
-		return &ListSeriesResult{Items: []*models.Series{}, Total: total}, nil
-	}
-	if end > total {
-		end = total
-	}
-
-	return &ListSeriesResult{Items: allItems[offset:end], Total: total}, nil
+	return allItems, nil
 }
 
 // PutSeries creates or replaces a series item.
@@ -310,6 +260,9 @@ func PutSeries(ctx context.Context, s *models.Series) error {
 		TableName: aws.String(database.TableSeries),
 		Item:      item,
 	})
+	if err == nil {
+		InvalidateSeriesCache()
+	}
 	return err
 }
 
@@ -349,6 +302,9 @@ func UpdateSeriesFields(ctx context.Context, id string, fields map[string]interf
 		ExpressionAttributeNames:  exprNames,
 		ExpressionAttributeValues: exprVals,
 	})
+	if err == nil {
+		InvalidateSeriesCache()
+	}
 	return err
 }
 
@@ -365,6 +321,9 @@ func UpdateSeriesCoverURL(ctx context.Context, id, coverURL string) error {
 			":now": &types.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
 		},
 	})
+	if err == nil {
+		InvalidateSeriesCache()
+	}
 	return err
 }
 
@@ -391,10 +350,13 @@ func DeleteSeries(ctx context.Context, id string) error {
 			"id": &types.AttributeValueMemberS{Value: id},
 		},
 	})
+	if err == nil {
+		InvalidateSeriesCache()
+	}
 	return err
 }
 
-// CountSeries returns the approximate item count by scanning the table.
+// CountSeries returns the approximate item count via DescribeTable (no RCU cost).
 func CountSeries(ctx context.Context) (int64, error) {
 	out, err := database.Client.DescribeTable(ctx, &dynamodb.DescribeTableInput{
 		TableName: aws.String(database.TableSeries),

@@ -181,12 +181,6 @@ watch(() => route.query.q, (q) => {
 </script>
 
 <style scoped>
-.nav-link {
-  @apply flex-shrink-0 px-3 py-1 text-xs font-medium text-gray-600 hover:text-gray-950 rounded-lg hover:bg-gray-100 transition-colors whitespace-nowrap dark:text-gray-400 dark:hover:text-white dark:hover:bg-dark-card;
-}
-.nav-link.active {
-  @apply text-gray-950 bg-gray-100 dark:text-white dark:bg-dark-card;
-}
 .theme-btn {
   @apply h-8 w-8 inline-flex items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition-colors hover:border-primary/60 hover:text-primary dark:border-dark-border dark:text-gray-400 dark:hover:text-primary flex-shrink-0;
 }

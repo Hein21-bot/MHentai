@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -17,7 +18,16 @@ import (
 
 var ErrNotFound = fmt.Errorf("not found")
 
-// GetChapterByID fetches a chapter by primary key.
+// chapterLiteProjection is a ProjectionExpression that excludes the images field.
+// Used when we only need chapter metadata, not image URLs.
+const chapterLiteProjection = "id, series_id, slug, title, #n, #lang, view_count, source_url, created_at, updated_at"
+
+var chapterLiteNames = map[string]string{
+	"#n":    "number",
+	"#lang": "language",
+}
+
+// GetChapterByID fetches a chapter by primary key (includes images).
 func GetChapterByID(ctx context.Context, id string) (*models.Chapter, error) {
 	out, err := database.Client.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(database.TableChapters),
@@ -38,7 +48,7 @@ func GetChapterByID(ctx context.Context, id string) (*models.Chapter, error) {
 	return &ch, nil
 }
 
-// GetChapterBySlug fetches a chapter via the slug GSI.
+// GetChapterBySlug fetches a chapter via the slug GSI (includes images for reading).
 func GetChapterBySlug(ctx context.Context, slug string) (*models.Chapter, error) {
 	out, err := database.Client.Query(ctx, &dynamodb.QueryInput{
 		TableName:              aws.String(database.TableChapters),
@@ -63,6 +73,7 @@ func GetChapterBySlug(ctx context.Context, slug string) (*models.Chapter, error)
 }
 
 // ListChaptersBySeries returns all chapters for a series, sorted by number ASC.
+// Images are excluded — use GetChapterBySlug when images are needed.
 func ListChaptersBySeries(ctx context.Context, seriesID string) ([]*models.Chapter, error) {
 	out, err := database.Client.Query(ctx, &dynamodb.QueryInput{
 		TableName:              aws.String(database.TableChapters),
@@ -71,7 +82,9 @@ func ListChaptersBySeries(ctx context.Context, seriesID string) ([]*models.Chapt
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":sid": &types.AttributeValueMemberS{Value: seriesID},
 		},
-		ScanIndexForward: aws.Bool(true), // ascending by number
+		ProjectionExpression:     aws.String(chapterLiteProjection),
+		ExpressionAttributeNames: chapterLiteNames,
+		ScanIndexForward:         aws.Bool(true), // ascending by number
 	})
 	if err != nil {
 		return nil, err
@@ -86,48 +99,124 @@ func ListChaptersBySeries(ctx context.Context, seriesID string) ([]*models.Chapt
 	return chapters, nil
 }
 
-// GetAdjacentChapters returns prev and next chapters relative to the given number.
-func GetAdjacentChapters(ctx context.Context, seriesID string, number float64) (prev *models.Chapter, next *models.Chapter) {
-	all, err := ListChaptersBySeries(ctx, seriesID)
-	if err != nil || len(all) == 0 {
-		return nil, nil
+// LatestChaptersBySeries returns the last n chapters for a series (highest numbers first).
+// Uses DynamoDB Limit instead of fetching all chapters — O(n) not O(total).
+func LatestChaptersBySeries(ctx context.Context, seriesID string, n int) ([]*models.Chapter, error) {
+	out, err := database.Client.Query(ctx, &dynamodb.QueryInput{
+		TableName:              aws.String(database.TableChapters),
+		IndexName:              aws.String("series_id-number-index"),
+		KeyConditionExpression: aws.String("series_id = :sid"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":sid": &types.AttributeValueMemberS{Value: seriesID},
+		},
+		ProjectionExpression:     aws.String(chapterLiteProjection),
+		ExpressionAttributeNames: chapterLiteNames,
+		ScanIndexForward:         aws.Bool(false), // descending = highest number first
+		Limit:                    aws.Int32(int32(n)),
+	})
+	if err != nil {
+		return nil, err
 	}
-	for i, ch := range all {
-		if ch.Number == number {
-			if i > 0 {
-				prev = all[i-1]
-			}
-			if i < len(all)-1 {
-				next = all[i+1]
-			}
-			return
+	var chapters []*models.Chapter
+	for _, item := range out.Items {
+		var ch models.Chapter
+		if err = attributevalue.UnmarshalMap(item, &ch); err == nil {
+			chapters = append(chapters, &ch)
 		}
 	}
-	return nil, nil
+	return chapters, nil
+}
+
+// GetAdjacentChapters returns prev and next chapters using two targeted GSI queries
+// instead of fetching the full chapter list.
+func GetAdjacentChapters(ctx context.Context, seriesID string, number float64) (prev *models.Chapter, next *models.Chapter) {
+	numAV, err := attributevalue.Marshal(number)
+	if err != nil {
+		return nil, nil
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		out, err := database.Client.Query(ctx, &dynamodb.QueryInput{
+			TableName:              aws.String(database.TableChapters),
+			IndexName:              aws.String("series_id-number-index"),
+			KeyConditionExpression: aws.String("series_id = :sid AND #n < :num"),
+			ExpressionAttributeNames: map[string]string{
+				"#n":    "number",
+				"#lang": "language",
+			},
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":sid": &types.AttributeValueMemberS{Value: seriesID},
+				":num": numAV,
+			},
+			ProjectionExpression: aws.String(chapterLiteProjection),
+			ScanIndexForward:     aws.Bool(false), // descending → closest lower number first
+			Limit:                aws.Int32(1),
+		})
+		if err == nil && len(out.Items) > 0 {
+			var ch models.Chapter
+			if attributevalue.UnmarshalMap(out.Items[0], &ch) == nil {
+				prev = &ch
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		out, err := database.Client.Query(ctx, &dynamodb.QueryInput{
+			TableName:              aws.String(database.TableChapters),
+			IndexName:              aws.String("series_id-number-index"),
+			KeyConditionExpression: aws.String("series_id = :sid AND #n > :num"),
+			ExpressionAttributeNames: map[string]string{
+				"#n":    "number",
+				"#lang": "language",
+			},
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":sid": &types.AttributeValueMemberS{Value: seriesID},
+				":num": numAV,
+			},
+			ProjectionExpression: aws.String(chapterLiteProjection),
+			ScanIndexForward:     aws.Bool(true), // ascending → closest higher number first
+			Limit:                aws.Int32(1),
+		})
+		if err == nil && len(out.Items) > 0 {
+			var ch models.Chapter
+			if attributevalue.UnmarshalMap(out.Items[0], &ch) == nil {
+				next = &ch
+			}
+		}
+	}()
+
+	wg.Wait()
+	return
 }
 
 // LatestChapters returns the most recently added chapters across all series.
-// When a language filter is applied, DynamoDB's Limit is NOT used because DynamoDB
-// applies Limit before FilterExpression — we paginate instead to collect enough results.
 func LatestChapters(ctx context.Context, limit int, language string) ([]*models.Chapter, error) {
 	input := &dynamodb.QueryInput{
 		TableName:              aws.String(database.TableChapters),
 		IndexName:              aws.String("type-created_at-index"),
 		KeyConditionExpression: aws.String("#t = :type"),
 		ExpressionAttributeNames: map[string]string{
-			"#t": "#type",
+			"#t":    "#type",
+			"#lang": "language",
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":type": &types.AttributeValueMemberS{Value: "CHAPTER"},
 		},
-		ScanIndexForward: aws.Bool(false), // newest first
+		ProjectionExpression: aws.String("id, series_id, slug, title, #n, #lang, view_count, created_at, updated_at"),
+		ScanIndexForward:     aws.Bool(false), // newest first
 	}
 
+	// Reuse the #n name already declared
+	input.ExpressionAttributeNames["#n"] = "number"
+
 	if language != "" {
-		input.FilterExpression = aws.String("#language = :language")
-		input.ExpressionAttributeNames["#language"] = "language"
+		input.FilterExpression = aws.String("#lang = :language")
 		input.ExpressionAttributeValues[":language"] = &types.AttributeValueMemberS{Value: language}
-		// No DynamoDB Limit here — paginate until we collect enough post-filter results
 	} else {
 		input.Limit = aws.Int32(int32(limit))
 	}
@@ -156,7 +245,7 @@ func LatestChapters(ctx context.Context, limit int, language string) ([]*models.
 	return chapters, nil
 }
 
-// ListAllChapters scans all chapters (admin use).
+// ListAllChapters scans all chapters (admin use). Includes images.
 func ListAllChapters(ctx context.Context, seriesID string) ([]*models.Chapter, error) {
 	input := &dynamodb.ScanInput{
 		TableName: aws.String(database.TableChapters),
@@ -213,29 +302,51 @@ func PutChapter(ctx context.Context, ch *models.Chapter) error {
 }
 
 // UpdateChaptersLanguage updates the language field on every chapter belonging to a series.
+// Runs up to 25 concurrent UpdateItem calls to avoid N sequential round-trips.
 func UpdateChaptersLanguage(ctx context.Context, seriesID, language string) error {
 	chapters, err := ListAllChapters(ctx, seriesID)
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	const maxConcurrent = 25
+	sem := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
+	var firstErr error
+	var errMu sync.Mutex
+
 	for _, ch := range chapters {
-		_, _ = database.Client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-			TableName: aws.String(database.TableChapters),
-			Key: map[string]types.AttributeValue{
-				"id": &types.AttributeValueMemberS{Value: ch.ID},
-			},
-			UpdateExpression: aws.String("SET #lang = :lang, updated_at = :now"),
-			ExpressionAttributeNames: map[string]string{
-				"#lang": "language",
-			},
-			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":lang": &types.AttributeValueMemberS{Value: language},
-				":now":  &types.AttributeValueMemberS{Value: now},
-			},
-		})
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(id string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			_, e := database.Client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+				TableName: aws.String(database.TableChapters),
+				Key: map[string]types.AttributeValue{
+					"id": &types.AttributeValueMemberS{Value: id},
+				},
+				UpdateExpression: aws.String("SET #lang = :lang, updated_at = :now"),
+				ExpressionAttributeNames: map[string]string{
+					"#lang": "language",
+				},
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":lang": &types.AttributeValueMemberS{Value: language},
+					":now":  &types.AttributeValueMemberS{Value: now},
+				},
+			})
+			if e != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = e
+				}
+				errMu.Unlock()
+			}
+		}(ch.ID)
 	}
-	return nil
+	wg.Wait()
+	return firstErr
 }
 
 // UpdateChapterImages replaces the images list for a chapter and optionally saves the source URL.
@@ -287,14 +398,38 @@ func DeleteChapter(ctx context.Context, id string) error {
 	return err
 }
 
-// DeleteChaptersBySeries deletes all chapters belonging to a series.
+// DeleteChaptersBySeries deletes all chapters belonging to a series using BatchWriteItem.
+// Groups deletes in batches of 25 (DynamoDB limit) instead of N sequential deletes.
 func DeleteChaptersBySeries(ctx context.Context, seriesID string) error {
 	chapters, err := ListAllChapters(ctx, seriesID)
 	if err != nil {
 		return err
 	}
-	for _, ch := range chapters {
-		if err = DeleteChapter(ctx, ch.ID); err != nil {
+	if len(chapters) == 0 {
+		return nil
+	}
+
+	const batchSize = 25
+	for i := 0; i < len(chapters); i += batchSize {
+		end := i + batchSize
+		if end > len(chapters) {
+			end = len(chapters)
+		}
+		requests := make([]types.WriteRequest, end-i)
+		for j, ch := range chapters[i:end] {
+			requests[j] = types.WriteRequest{
+				DeleteRequest: &types.DeleteRequest{
+					Key: map[string]types.AttributeValue{
+						"id": &types.AttributeValueMemberS{Value: ch.ID},
+					},
+				},
+			}
+		}
+		if _, err = database.Client.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]types.WriteRequest{
+				database.TableChapters: requests,
+			},
+		}); err != nil {
 			return err
 		}
 	}
@@ -318,7 +453,7 @@ func ChapterSlugExists(ctx context.Context, slug string) (bool, error) {
 	return out.Count > 0, nil
 }
 
-// CountChapters returns approximate chapter count.
+// CountChapters returns approximate chapter count via DescribeTable (no RCU cost).
 func CountChapters(ctx context.Context) (int64, error) {
 	out, err := database.Client.DescribeTable(ctx, &dynamodb.DescribeTableInput{
 		TableName: aws.String(database.TableChapters),
@@ -334,7 +469,6 @@ func CountChapters(ctx context.Context) (int64, error) {
 
 // SumImagesAndViews scans all chapters and series to compute total image count and total view count.
 func SumImagesAndViews(ctx context.Context) (totalImages int64, totalViews int64) {
-	// Sum images from chapters scan
 	chInput := &dynamodb.ScanInput{
 		TableName:            aws.String(database.TableChapters),
 		ProjectionExpression: aws.String("images, view_count"),
@@ -357,7 +491,6 @@ func SumImagesAndViews(ctx context.Context) (totalImages int64, totalViews int64
 		chInput.ExclusiveStartKey = out.LastEvaluatedKey
 	}
 
-	// Sum views from series scan
 	sInput := &dynamodb.ScanInput{
 		TableName:            aws.String(database.TableSeries),
 		ProjectionExpression: aws.String("view_count"),

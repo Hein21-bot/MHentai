@@ -12,35 +12,35 @@
     </div>
 
     <!-- Reader -->
-    <div v-else-if="data" class="min-h-screen bg-[#111]">
+    <div v-else-if="data" class="min-h-screen bg-gray-50 dark:bg-[#111]">
 
       <!-- ── Header ── -->
-      <div class="relative overflow-hidden bg-[#0d0d0d]">
-        <!-- Blurred cover backdrop -->
+      <div class="relative overflow-hidden bg-white dark:bg-[#0d0d0d] border-b border-gray-200 dark:border-transparent">
+        <!-- Blurred cover backdrop (dark mode only) -->
         <div v-if="data.chapter.series?.cover_url"
-          class="absolute inset-0 scale-110 opacity-20 blur-2xl pointer-events-none">
+          class="absolute inset-0 scale-110 opacity-20 blur-2xl pointer-events-none hidden dark:block">
           <img :src="data.chapter.series.cover_url" class="w-full h-full object-cover"/>
         </div>
-        <div class="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-[#0d0d0d] pointer-events-none"/>
+        <div class="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-[#0d0d0d] pointer-events-none hidden dark:block"/>
 
         <div class="relative max-w-3xl mx-auto px-4 pt-5 pb-7">
           <!-- Breadcrumb -->
-          <nav class="flex items-center flex-wrap gap-1 text-[11px] text-white/30 mb-5">
-            <RouterLink :to="`/${route.meta.lang}`" class="hover:text-white/60 transition-colors">MHentai</RouterLink>
-            <span class="text-white/20">›</span>
+          <nav class="flex items-center flex-wrap gap-1 text-[11px] text-gray-400 dark:text-white/30 mb-5">
+            <RouterLink :to="`/${route.meta.lang}`" class="hover:text-primary dark:hover:text-white/60 transition-colors">MHentai</RouterLink>
+            <span class="text-gray-300 dark:text-white/20">›</span>
             <RouterLink v-if="data.chapter.series" :to="`/${route.meta.lang}/series/${data.chapter.series.slug}`"
-              class="hover:text-white/60 transition-colors truncate max-w-[180px]">
+              class="hover:text-primary dark:hover:text-white/60 transition-colors truncate max-w-[120px] sm:max-w-[180px]">
               {{ data.chapter.series.title }}
             </RouterLink>
-            <span class="text-white/20">›</span>
-            <span class="text-white/50 truncate max-w-[140px]">{{ data.chapter.title }}</span>
+            <span class="text-gray-300 dark:text-white/20">›</span>
+            <span class="text-gray-500 dark:text-white/50 truncate max-w-[100px] sm:max-w-[140px]">{{ data.chapter.title }}</span>
           </nav>
 
           <!-- Cover + info -->
           <div class="flex gap-4 sm:gap-6 items-start mb-6">
             <RouterLink v-if="data.chapter.series?.cover_url"
               :to="`/${route.meta.lang}/series/${data.chapter.series.slug}`"
-              class="flex-shrink-0 w-[72px] sm:w-24 rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10">
+              class="flex-shrink-0 w-[72px] sm:w-24 rounded-xl overflow-hidden shadow-lg ring-1 ring-gray-200 dark:shadow-2xl dark:ring-white/10">
               <img :src="data.chapter.series.cover_url" :alt="data.chapter.series.title"
                 class="w-full aspect-[2/3] object-cover"/>
             </RouterLink>
@@ -50,63 +50,61 @@
                 class="text-xs text-primary/80 hover:text-primary transition-colors font-medium block mb-1 truncate">
                 {{ data.chapter.series.title }}
               </RouterLink>
-              <h1 class="text-white font-bold text-xl sm:text-2xl leading-tight mb-3">{{ data.chapter.title }}</h1>
-              <p class="text-[11px] text-white/30 leading-relaxed hidden sm:block">
-                Read <span class="text-white/50">{{ data.chapter.title }}</span> at MHentai.
-                Manga <span class="text-white/50">{{ data.chapter.series?.title }}</span> is always updated at MHentai.
+              <h1 class="text-gray-900 dark:text-white font-bold text-xl sm:text-2xl leading-tight mb-3">{{ data.chapter.title }}</h1>
+              <p class="text-[11px] text-gray-400 dark:text-white/30 leading-relaxed hidden sm:block">
+                Read <span class="text-gray-500 dark:text-white/50">{{ data.chapter.title }}</span> at MHentai.
+                Manga <span class="text-gray-500 dark:text-white/50">{{ data.chapter.series?.title }}</span> is always updated at MHentai.
                 Don't forget to read the other manga updates.
               </p>
             </div>
           </div>
 
           <!-- Description (mobile) -->
-          <p class="text-[11px] text-white/30 leading-relaxed mb-5 sm:hidden">
-            Read <span class="text-white/50">{{ data.chapter.title }}</span> at MHentai.
-            Manga <span class="text-white/50">{{ data.chapter.series?.title }}</span> is always updated at MHentai.
+          <p class="text-[11px] text-gray-400 dark:text-white/30 leading-relaxed mb-5 sm:hidden">
+            Read <span class="text-gray-500 dark:text-white/50">{{ data.chapter.title }}</span> at MHentai.
+            Manga <span class="text-gray-500 dark:text-white/50">{{ data.chapter.series?.title }}</span> is always updated at MHentai.
             Don't forget to read the other manga updates. A list of manga collections MHentai is in the Manga List menu.
           </p>
 
           <!-- Controls row -->
           <div class="flex items-center gap-2 flex-wrap">
             <select v-if="seriesChapters.length" v-model="selectedChapterSlug" @change="goToChapter"
-              class="flex-1 min-w-[140px] bg-white/10 border border-white/20 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary/60 cursor-pointer appearance-none">
-              <option v-for="ch in seriesChapters" :key="ch.id" :value="ch.slug"
-                class="bg-[#1a1a1a] text-white">
+              class="flex-1 min-w-0 bg-gray-100 border border-gray-300 text-gray-900 dark:bg-white/10 dark:border-white/20 dark:text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary/60 cursor-pointer appearance-none">
+              <option v-for="ch in seriesChapters" :key="ch.id" :value="ch.slug">
                 {{ ch.title || `Chapter ${ch.number}` }}
               </option>
             </select>
-            <RouterLink v-if="data.prev_chapter?.slug"
-              :to="`/${route.meta.lang}/read/${data.prev_chapter.slug}`"
-              class="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white/80 hover:text-white text-sm font-medium transition-all border border-white/10 flex-shrink-0">
+            <button v-if="data.prev_chapter?.slug"
+              @click="goToChapterAd(data.prev_chapter.slug)"
+              class="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 hover:text-gray-900 dark:bg-white/10 dark:hover:bg-white/20 dark:text-white/80 dark:hover:text-white text-sm font-medium transition-all border border-gray-200 dark:border-white/10 flex-shrink-0">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m15 19-7-7 7-7"/></svg>
               Prev
-            </RouterLink>
-            <RouterLink v-if="data.next_chapter?.slug"
-              :to="`/${route.meta.lang}/read/${data.next_chapter.slug}`"
+            </button>
+            <button v-if="data.next_chapter?.slug"
+              @click="goToChapterAd(data.next_chapter.slug)"
               class="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-600 text-white text-sm font-bold transition-all shadow-lg shadow-primary/20 flex-shrink-0">
               Next
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 5 7 7-7 7"/></svg>
-            </RouterLink>
+            </button>
           </div>
         </div>
       </div>
 
       <!-- ── Ad slot top ── -->
-      <div class="max-w-3xl mx-auto px-4 py-3">
-        <AdSpace type="leaderboard" :dark="true" :bordered="true" />
+      <div class="max-w-3xl mx-auto px-4 py-3 flex justify-center">
+        <AdBanner300 />
       </div>
 
       <!-- ── Images ── -->
       <div class="max-w-3xl mx-auto">
         <div v-for="(img, idx) in data.chapter.images" :key="idx" class="w-full relative">
           <div v-if="!imgLoaded[idx] && !imgFailed[idx]"
-            class="w-full bg-[#1a1a1a] animate-pulse flex flex-col items-center justify-center gap-3"
-            style="min-height: 480px">
-            <svg class="w-8 h-8 text-white/20 animate-spin" fill="none" viewBox="0 0 24 24">
+            class="w-full bg-gray-200 dark:bg-[#1a1a1a] animate-pulse flex flex-col items-center justify-center gap-3 min-h-[280px] sm:min-h-[480px]">
+            <svg class="w-8 h-8 text-gray-400 dark:text-white/20 animate-spin" fill="none" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
             </svg>
-            <span class="text-xs text-white/20">Page {{ idx + 1 }}</span>
+            <span class="text-xs text-gray-400 dark:text-white/20">Page {{ idx + 1 }}</span>
           </div>
           <img
             :src="resolveImg(img)"
@@ -118,7 +116,7 @@
           />
         </div>
         <div v-if="!data.chapter.images || data.chapter.images.length === 0"
-          class="flex items-center justify-center py-32 text-white/30">
+          class="flex items-center justify-center py-32 text-gray-400 dark:text-white/30">
           <div class="text-center">
             <p class="text-lg mb-2">No images in this chapter</p>
             <p class="text-sm opacity-60">Images may not have been imported yet</p>
@@ -126,43 +124,43 @@
         </div>
       </div>
 
-      <!-- ── Ad slot bottom ── -->
-      <div class="max-w-3xl mx-auto px-4 pt-4">
-        <AdSpace type="leaderboard" :dark="true" :bordered="true" />
+      <!-- ── Ad slot bottom (between images and nav) ── -->
+      <div class="max-w-3xl mx-auto px-4 pt-6 pb-2 flex justify-center">
+        <AdNative />
       </div>
 
       <!-- ── Bottom nav ── -->
       <div class="max-w-3xl mx-auto px-4 py-8">
         <div class="flex items-center justify-center gap-3 flex-wrap">
-          <RouterLink v-if="data.prev_chapter?.slug"
-            :to="`/${route.meta.lang}/read/${data.prev_chapter.slug}`"
-            class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white/70 hover:text-white text-sm font-medium transition-all border border-white/10">
+          <button v-if="data.prev_chapter?.slug"
+            @click="goToChapterAd(data.prev_chapter.slug)"
+            class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900 dark:bg-white/10 dark:hover:bg-white/20 dark:text-white/70 dark:hover:text-white text-sm font-medium transition-all border border-gray-200 dark:border-white/10">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m15 19-7-7 7-7"/></svg>
             Prev Chapter
-          </RouterLink>
+          </button>
           <RouterLink v-if="data.chapter.series"
             :to="`/${route.meta.lang}/series/${data.chapter.series.slug}`"
-            class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white/70 hover:text-white text-sm font-medium transition-all border border-white/10">
+            class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900 dark:bg-white/10 dark:hover:bg-white/20 dark:text-white/70 dark:hover:text-white text-sm font-medium transition-all border border-gray-200 dark:border-white/10">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
             Chapter List
           </RouterLink>
-          <RouterLink v-if="data.next_chapter?.slug"
-            :to="`/${route.meta.lang}/read/${data.next_chapter.slug}`"
+          <button v-if="data.next_chapter?.slug"
+            @click="goToChapterAd(data.next_chapter.slug)"
             class="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-primary hover:bg-primary-600 text-white text-sm font-bold transition-all shadow-lg shadow-primary/20">
             Next Chapter
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 5 7 7-7 7"/></svg>
-          </RouterLink>
+          </button>
         </div>
       </div>
 
       <!-- ── Related Series ── -->
       <div v-if="relatedSeries.length" class="max-w-3xl mx-auto px-4 pb-12">
-        <h2 class="text-white/70 font-bold text-sm mb-4 pb-2 border-b border-white/10 uppercase tracking-wider">You May Also Like</h2>
+        <h2 class="text-gray-500 dark:text-white/70 font-bold text-sm mb-4 pb-2 border-b border-gray-200 dark:border-white/10 uppercase tracking-wider">You May Also Like</h2>
         <div class="grid grid-cols-3 gap-2.5 sm:grid-cols-4 sm:gap-3">
           <RouterLink v-for="s in relatedSeries" :key="s.id"
             :to="`/${route.meta.lang}/series/${s.slug}`"
             class="group block">
-            <div class="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 ring-1 ring-white/5">
+            <div class="relative aspect-[2/3] rounded-xl overflow-hidden bg-gray-200 dark:bg-white/5 ring-1 ring-gray-200 dark:ring-white/5">
               <img v-if="s.cover_url" :src="s.cover_url" :alt="s.title"
                 class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                 @error="(e) => (e.target as HTMLImageElement).style.display='none'"/>
@@ -196,20 +194,6 @@
       </button>
     </div>
 
-    <!-- Floating video ad (outside v-if chain) -->
-    <!-- <div v-if="data && data.chapter.images && data.chapter.images.length > 0 && !adClosed"
-      class="fixed bottom-4 right-4 z-50 w-48 sm:w-56 shadow-2xl rounded-lg overflow-hidden border border-white/20 bg-black">
-      <div class="relative">
-        <div class="w-full aspect-video bg-gray-900 flex items-center justify-center">
-          <svg class="w-8 h-8 text-white/20" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-          <span class="absolute bottom-1 left-2 text-[9px] text-white/30 tracking-widest uppercase">Advertisement</span>
-        </div>
-        <button @click="adClosed = true"
-          class="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 flex items-center justify-center text-white/70 hover:text-white hover:bg-black transition-colors">
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M18 6 6 18"/></svg>
-        </button>
-      </div>
-    </div> -->
   </div>
 </template>
 
@@ -218,7 +202,9 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { chapterApi, seriesApi } from '@/services/api'
 import { addReadHistory } from '@/services/history'
-import AdSpace from '@/components/AdSpace.vue'
+import AdNative from '@/components/ads/AdNative.vue'
+import AdBanner300 from '@/components/ads/AdBanner300.vue'
+import { starText } from '@/utils/ratings'
 import type { Chapter, Series } from '@/services/api'
 
 interface ChapterResponse {
@@ -233,16 +219,23 @@ const data = ref<ChapterResponse | null>(null)
 const loading = ref(true)
 const error = ref(false)
 const relatedSeries = ref<Series[]>([])
-const adClosed = ref(false)
 const imgLoaded = ref<boolean[]>([])
 const imgFailed = ref<boolean[]>([])
 const seriesChapters = ref<Chapter[]>([])
 
 const selectedChapterSlug = computed(() => route.params.slug as string)
 
+const SMART_LINK = 'https://www.effectivecpmnetwork.com/h8ucit5btv?key=504242cfab2278b1c171b094c62a04e3'
+
 function goToChapter(e: Event) {
   const slug = (e.target as HTMLSelectElement).value
   router.push(`/${route.meta.lang}/read/${slug}`)
+}
+
+function goToChapterAd(slug: string) {
+  const url = `${window.location.origin}/${route.meta.lang}/read/${slug}`
+  window.open(url, '_blank', 'noopener')
+  window.location.href = SMART_LINK
 }
 
 const adminToken = localStorage.getItem('admin_token') || ''
@@ -292,19 +285,6 @@ function onImgError(e: Event, idx: number) {
   imgLoaded.value[idx] = true
 }
 
-function getStars(s: { id: string; view_count: number }): number {
-  let base = 3.0
-  if (s.view_count > 0) base = Math.min(4.5, 3.0 + Math.log10(s.view_count + 1) * 0.5)
-  let hash = 0
-  for (const c of s.id) hash = (hash * 31 + c.charCodeAt(0)) & 0xFF
-  return Math.min(5.0, parseFloat((base + (hash % 6) / 10).toFixed(1)))
-}
-
-function starText(s: { id: string; view_count: number }): string {
-  const r = getStars(s)
-  return '★'.repeat(Math.round(r)) + '☆'.repeat(5 - Math.round(r)) + ` ${r.toFixed(1)}`
-}
-
 async function loadRelated(currentSeriesId?: string) {
   try {
     const res = await seriesApi.list({ sort: 'views', limit: 12, lang: route.meta.lang })
@@ -322,7 +302,6 @@ async function load() {
   data.value = null
   relatedSeries.value = []
   seriesChapters.value = []
-  adClosed.value = false
   imgLoaded.value = []
   imgFailed.value = []
   try {

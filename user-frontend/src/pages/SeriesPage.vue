@@ -1,25 +1,9 @@
 <template>
   <div>
-    <!-- Floating video ad - currently commented out. Remove the comment if you want to enable it again. -->
-    <!--
-    <div v-if="!loading && series && !adClosed"
-      class="fixed bottom-4 right-4 z-50 w-48 sm:w-56 shadow-2xl rounded-lg overflow-hidden border border-white/20 bg-black">
-      <div class="relative">
-        <div class="w-full aspect-video bg-gray-900 flex items-center justify-center">
-          <svg class="w-8 h-8 text-white/20" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-          <span class="absolute bottom-1 left-2 text-[9px] text-white/30 tracking-widest uppercase">Advertisement</span>
-        </div>
-        <button @click="adClosed = true"
-          class="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 flex items-center justify-center text-white/70 hover:text-white hover:bg-black transition-colors">
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M18 6 6 18"/></svg>
-        </button>
-      </div>
-    </div>
-    -->
     <!-- Loading -->
     <div v-if="loading" class="space-y-6">
-      <div class="flex flex-col gap-5 sm:flex-row">
-        <div class="w-36 aspect-[2/3] bg-gray-200 rounded-xl animate-pulse flex-shrink-0 dark:bg-dark-card sm:w-40" />
+      <div class="flex flex-row gap-4 sm:gap-5">
+        <div class="w-28 sm:w-48 aspect-[2/3] bg-gray-200 rounded-xl animate-pulse flex-shrink-0 dark:bg-dark-card" />
         <div class="flex-1 space-y-3 pt-2">
           <div class="h-7 bg-gray-200 rounded w-3/4 animate-pulse dark:bg-dark-card" />
           <div class="h-4 bg-gray-200 rounded w-1/3 animate-pulse dark:bg-dark-card" />
@@ -38,12 +22,12 @@
     <!-- Content -->
     <div v-else-if="series" class="space-y-6">
       <!-- Header -->
-      <div class="flex flex-col gap-5 items-start sm:flex-row">
-        <div class="w-36 sm:w-48 flex-shrink-0 rounded-xl overflow-hidden border border-gray-200 aspect-[2/3] bg-white shadow-sm dark:border-dark-border dark:bg-dark-card dark:shadow-none">
+      <div class="flex flex-row gap-4 items-start sm:gap-5">
+        <div class="w-28 sm:w-48 flex-shrink-0 rounded-xl overflow-hidden border border-gray-200 aspect-[2/3] bg-white shadow-sm dark:border-dark-border dark:bg-dark-card dark:shadow-none">
           <img v-if="series.cover_url" :src="series.cover_url" :alt="series.title" class="w-full h-full object-cover" @error="imgError"/>
         </div>
         <div class="flex-1 min-w-0 space-y-2">
-          <h1 class="text-xl sm:text-2xl font-extrabold text-gray-950 leading-tight dark:text-white">{{ series.title }}</h1>
+          <h1 class="text-base sm:text-2xl font-extrabold text-gray-950 leading-tight dark:text-white">{{ series.title }}</h1>
           <div class="flex flex-wrap gap-2">
             <span :class="['text-xs font-bold px-2.5 py-1 rounded-full', series.status === 'ongoing' ? 'bg-green-600/20 text-green-400' : 'bg-blue-600/20 text-blue-400']">
               {{ series.status === 'ongoing' ? 'Ongoing' : 'Completed' }}
@@ -70,22 +54,24 @@
           </div>
           <!-- Reading buttons -->
           <div v-if="series.chapters && series.chapters.length > 0" class="flex flex-wrap gap-2 mt-1">
-            <RouterLink :to="`/${route.meta.lang}/read/${series.chapters[0].slug}`"
+            <button @click="goToChapterAd(series.chapters[0].slug)"
               class="inline-flex items-center gap-2 bg-primary hover:bg-primary-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-colors">
               <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
               First Chapter
-            </RouterLink>
-            <RouterLink v-if="series.chapters.length > 1" :to="`/${route.meta.lang}/read/${series.chapters[series.chapters.length - 1].slug}`"
+            </button>
+            <button v-if="series.chapters.length > 1" @click="goToChapterAd(series.chapters[series.chapters.length - 1].slug)"
               class="inline-flex items-center gap-2 border border-primary text-primary hover:bg-primary hover:text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-colors">
               <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
               Last Chapter
-            </RouterLink>
+            </button>
           </div>
         </div>
       </div>
 
-      <!-- Ad slot -->
-      <AdSpace type="leaderboard" />
+      <!-- Ad top -->
+      <div class="flex justify-center">
+        <AdBanner300 />
+      </div>
 
       <!-- Latest Reading -->
       <div v-if="seriesHistory.length" class="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-border dark:bg-dark-card overflow-hidden">
@@ -111,31 +97,36 @@
       <div>
         <h2 class="section-title mb-3">Chapters <span class="text-gray-500 font-normal text-sm dark:text-gray-600">({{ series.chapters?.length ?? 0 }})</span></h2>
         <div class="divide-y divide-gray-200 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm dark:divide-dark-border dark:border-dark-border dark:bg-transparent dark:shadow-none max-h-[32rem] overflow-y-auto">
-          <RouterLink
+          <button
             v-for="chapter in series.chapters"
             :key="chapter.id"
-            :to="`/${route.meta.lang}/read/${chapter.slug}`"
-            class="flex items-center gap-3 px-3 py-3 bg-white hover:bg-gray-50 transition-colors group dark:bg-dark-surface dark:hover:bg-dark-hover sm:px-4"
+            @click="goToChapterAd(chapter.slug)"
+            class="w-full flex items-center gap-3 px-3 py-3 bg-white hover:bg-gray-50 transition-colors group dark:bg-dark-surface dark:hover:bg-dark-hover sm:px-4"
           >
             <div class="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 flex-shrink-0 dark:bg-dark-card">
               {{ chapter.number || '?' }}
             </div>
-            <div class="flex-1 min-w-0">
+            <div class="flex-1 min-w-0 text-left">
               <p class="text-sm font-medium text-gray-800 truncate group-hover:text-primary transition-colors dark:text-gray-200">{{ chapter.title }}</p>
               <p class="text-2xs text-gray-500 dark:text-gray-600">{{ formatDate(chapter.created_at) }}</p>
             </div>
             <svg class="w-4 h-4 text-gray-400 flex-shrink-0 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" d="m9 5 7 7-7 7"/>
             </svg>
-          </RouterLink>
+          </button>
         </div>
+      </div>
+
+      <!-- Ad slot between chapters and related series -->
+      <div class="flex flex-col items-center gap-3">
+        <AdNative />
       </div>
 
       <!-- Related Series -->
       <div v-if="relatedSeries.length">
         <h2 class="section-title mb-3">Related Series</h2>
         <div class="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3 md:grid-cols-6">
-          <RouterLink v-for="s in relatedSeries" :key="s.id"
+          <RouterLink v-for="s in relatedSeries.slice(0, 6)" :key="s.id"
             :to="`/${route.meta.lang}/series/${s.slug}`"
             class="group block">
             <div class="relative aspect-[2/3] rounded-xl overflow-hidden bg-gray-200 dark:bg-dark-card">
@@ -159,36 +150,30 @@ import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { seriesApi } from '@/services/api'
 import { getReadHistoryForSeries, ReadHistoryItem } from '@/services/history'
-import AdSpace from '@/components/AdSpace.vue'
+import AdNative from '@/components/ads/AdNative.vue'
+import AdBanner300 from '@/components/ads/AdBanner300.vue'
+import { imgError, getStars, starText } from '@/utils/ratings'
 import type { Series } from '@/services/api'
 
 const route = useRoute()
 const series = ref<Series | null>(null)
 const loading = ref(true)
 const error = ref(false)
-const adClosed = ref(false)
 const relatedSeries = ref<Series[]>([])
 const seriesHistory = ref<ReadHistoryItem[]>([])
-
-function imgError(e: Event) { (e.target as HTMLImageElement).style.display = 'none' }
-
-function getStars(s: { id: string; view_count: number }): number {
-  let base = 3.0
-  if (s.view_count > 0) base = Math.min(4.5, 3.0 + Math.log10(s.view_count + 1) * 0.5)
-  let hash = 0
-  for (const c of s.id) hash = (hash * 31 + c.charCodeAt(0)) & 0xFF
-  return Math.min(5.0, parseFloat((base + (hash % 6) / 10).toFixed(1)))
-}
-
-function starText(s: { id: string; view_count: number }): string {
-  const r = getStars(s)
-  return '★'.repeat(Math.round(r)) + '☆'.repeat(5 - Math.round(r)) + ` ${r.toFixed(1)}`
-}
 
 function formatDate(iso: string) {
   if (!iso) return ''
   const d = new Date(iso)
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+const SMART_LINK = 'https://www.effectivecpmnetwork.com/h8ucit5btv?key=504242cfab2278b1c171b094c62a04e3'
+
+function goToChapterAd(slug: string) {
+  const url = `${window.location.origin}/${route.meta.lang}/read/${slug}`
+  window.open(url, '_blank', 'noopener')
+  window.location.href = SMART_LINK
 }
 
 function formatRelative(timestamp: number) {
@@ -205,10 +190,10 @@ function loadHistory() {
 
 async function loadRelated(currentId?: string) {
   try {
-    const res = await seriesApi.list({ sort: 'views', limit: 12, lang: route.meta.lang })
+    const res = await seriesApi.list({ sort: 'views', limit: 7, lang: route.meta.lang })
     relatedSeries.value = res.data.data
       .filter(s => s.id !== currentId)
-      .slice(0, 12)
+      .slice(0, 6)
   } catch {
     relatedSeries.value = []
   }
@@ -217,7 +202,6 @@ async function loadRelated(currentId?: string) {
 async function load() {
   loading.value = true
   error.value = false
-  adClosed.value = false
   series.value = null
   relatedSeries.value = []
   try {
