@@ -26,6 +26,9 @@ func New(adminToken string) *gin.Engine {
 	// Public API
 	api := r.Group("/api")
 	{
+		api.GET("/health", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		})
 		api.GET("/series", handlers.ListSeries)
 		api.GET("/series/:id", handlers.GetSeries)
 		api.GET("/series/:id/latest-chapters", handlers.GetSeriesLatestChapters)
