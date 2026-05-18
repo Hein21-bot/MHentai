@@ -9,6 +9,30 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, onBeforeUnmount } from 'vue'
 import AppHeader from '@/components/AppHeader.vue'
 import AppFooter from '@/components/AppFooter.vue'
+
+const healthUrl = `${import.meta.env.VITE_API_URL ?? 'http://localhost:8080/api'}/health`
+let keepAliveTimer: number | undefined
+
+const pingBackend = async () => {
+  try {
+    await fetch(healthUrl, { method: 'GET', cache: 'no-store' })
+    console.log('Keep-alive ping sent:', healthUrl)
+  } catch (err) {
+    console.warn('Keep-alive ping failed:', err)
+  }
+}
+
+onMounted(() => {
+  pingBackend()
+  keepAliveTimer = window.setInterval(pingBackend, 30 * 60 * 1000)
+})
+
+onBeforeUnmount(() => {
+  if (keepAliveTimer) {
+    window.clearInterval(keepAliveTimer)
+  }
+})
 </script>
