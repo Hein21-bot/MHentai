@@ -287,10 +287,10 @@ function onImgError(e: Event, idx: number) {
 
 async function loadRelated(currentSeriesId?: string) {
   try {
-    const res = await seriesApi.list({ sort: 'views', limit: 12, lang: route.meta.lang })
+    const res = await seriesApi.list({ sort: 'views', limit: 7, lang: route.meta.lang })
     relatedSeries.value = res.data.data
       .filter(s => s.id !== currentSeriesId)
-      .slice(0, 8)
+      .slice(0, 6)
   } catch {
     relatedSeries.value = []
   }
