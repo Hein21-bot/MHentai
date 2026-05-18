@@ -1,0 +1,110 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  background: var(--bg, #0f0f13);
+  color: var(--text, #e5e5e5);
+  transition: background .2s ease, color .2s ease;
+}
+
+body.dark {
+  --bg: #0f0f13;
+  --surface: #12121a;
+  --surface-strong: #1a1a24;
+  --card: #1a1a24;
+  --border: rgba(255, 255, 255, 0.1);
+  --text: #e5e5e5;
+  --muted: #94a3b8;
+  --heading: #ffffff;
+  --primary: #4f46e5;
+  --primary-contrast: #eef2ff;
+}
+
+body.light {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-strong: #f1f5f9;
+  --card: #ffffff;
+  --border: rgba(148, 163, 184, 0.2);
+  --text: #0f172a;
+  --muted: #475569;
+  --heading: #0f172a;
+  --primary: #4338ca;
+  --primary-contrast: #eef2ff;
+}
+
+body.light .text-white {
+  color: var(--text) !important;
+}
+
+body.light .text-gray-400 {
+  color: #64748b !important;
+}
+
+body.light .text-gray-500 {
+  color: #64748b !important;
+}
+
+body.light .text-gray-600 {
+  color: #475569 !important;
+}
+
+body.light .text-gray-300 {
+  color: #64748b !important;
+}
+
+body.light .bg-\[\#0f0f13\] {
+  background-color: var(--bg) !important;
+}
+
+body.light .bg-\[\#12121a\] {
+  background-color: var(--surface) !important;
+}
+
+body.light .bg-\[\#1a1a24\] {
+  background-color: var(--surface-strong) !important;
+}
+
+body.light .border-white\/10 {
+  border-color: var(--border) !important;
+}
+
+body.light .hover\:bg-white\/5:hover {
+  background-color: rgba(148, 163, 184, 0.05) !important;
+}
+
+body.light .bg-white\/5 {
+  background-color: rgba(148, 163, 184, 0.05) !important;
+}
+
+@layer components {
+  .admin-card {
+    @apply bg-[#1a1a24] border border-white/10 rounded-xl p-5;
+  }
+
+  .btn-primary {
+    @apply bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors text-sm flex items-center gap-2;
+  }
+
+  .btn-danger {
+    @apply bg-red-600/20 hover:bg-red-600 border border-red-600/40 hover:border-red-600 text-red-400 hover:text-white px-3 py-1.5 rounded-lg text-xs transition-all;
+  }
+
+  .form-input {
+    @apply bg-[#12121a] border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-full text-sm;
+  }
+
+  .nav-item {
+    @apply flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer;
+  }
+
+  .nav-item.active {
+    @apply bg-indigo-600/20 text-indigo-400;
+  }
+}

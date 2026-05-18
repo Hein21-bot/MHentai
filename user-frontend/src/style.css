@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+
+html { overflow-x: hidden; }
+
+:root {
+  color-scheme: light;
+  background: #f6f7fb;
+}
+
+:root.dark {
+  color-scheme: dark;
+  background: #0f0f0f;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background: #f6f7fb;
+  color: #171717;
+  font-family: system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+:root.dark body {
+  background: #0f0f0f;
+  color: #e5e5e5;
+}
+
+@layer components {
+  .card {
+    @apply bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm dark:bg-dark-card dark:border-dark-border dark:shadow-none;
+  }
+  .btn-primary {
+    @apply bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-600 transition-colors font-medium;
+  }
+  .section-title {
+    @apply text-lg font-bold text-gray-950 flex items-center gap-2 dark:text-white;
+  }
+  .section-title::before {
+    content: '';
+    @apply block w-1 h-5 bg-primary rounded-full;
+  }
+}

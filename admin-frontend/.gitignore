@@ -1,0 +1,36 @@
+# Node modules
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# Build output
+dist/
+dist-ssr/
+
+# Environment files
+.env
+.env.*.local
+
+# IDE and editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Vite
+.vite/
+
+# Misc
+*.log
+logs/
+*.tmp
+*.temp

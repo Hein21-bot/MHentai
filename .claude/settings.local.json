@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build:*)",
+      "Bash(curl -s http://localhost:8080/health)",
+      "Bash(curl -s \"http://localhost:8080/api/series?limit=5\")",
+      "Bash(curl -s \"http://localhost:8080/api/series/intern-haenyeo\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"http://localhost:8080/api/chapters/intern-haenyeo-chapter-1\")",
+      "Bash(curl -s \"http://localhost:8080/api/chapters/like-father-like-son-chapter-1\")",
+      "Bash(curl -I \"https://img.myanhwa.xyz/intern-haenyeo/hy-c1-p01.webp\")"
+    ]
+  }
+}
