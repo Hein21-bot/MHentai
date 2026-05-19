@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"sync"
@@ -74,8 +76,10 @@ func GetChapterBySlug(ctx context.Context, slug string) (*models.Chapter, error)
 
 // ListChaptersBySeries returns all chapters for a series, sorted by number ASC.
 // Images are excluded — use GetChapterBySlug when images are needed.
+// Paginates through all DynamoDB pages so series with >1MB of chapter data are
+// returned completely (the 1MB limit per Query call would otherwise truncate results).
 func ListChaptersBySeries(ctx context.Context, seriesID string) ([]*models.Chapter, error) {
-	out, err := database.Client.Query(ctx, &dynamodb.QueryInput{
+	qi := &dynamodb.QueryInput{
 		TableName:              aws.String(database.TableChapters),
 		IndexName:              aws.String("series_id-number-index"),
 		KeyConditionExpression: aws.String("series_id = :sid"),
@@ -84,17 +88,24 @@ func ListChaptersBySeries(ctx context.Context, seriesID string) ([]*models.Chapt
 		},
 		ProjectionExpression:     aws.String(chapterLiteProjection),
 		ExpressionAttributeNames: chapterLiteNames,
-		ScanIndexForward:         aws.Bool(true), // ascending by number
-	})
-	if err != nil {
-		return nil, err
+		ScanIndexForward:         aws.Bool(true),
 	}
 	var chapters []*models.Chapter
-	for _, item := range out.Items {
-		var ch models.Chapter
-		if err = attributevalue.UnmarshalMap(item, &ch); err == nil {
-			chapters = append(chapters, &ch)
+	for {
+		out, err := database.Client.Query(ctx, qi)
+		if err != nil {
+			return nil, err
 		}
+		for _, item := range out.Items {
+			var ch models.Chapter
+			if err = attributevalue.UnmarshalMap(item, &ch); err == nil {
+				chapters = append(chapters, &ch)
+			}
+		}
+		if out.LastEvaluatedKey == nil {
+			break
+		}
+		qi.ExclusiveStartKey = out.LastEvaluatedKey
 	}
 	return chapters, nil
 }
@@ -245,21 +256,135 @@ func LatestChapters(ctx context.Context, limit int, language string) ([]*models.
 	return chapters, nil
 }
 
-// ListAllChapters scans all chapters (admin use). Includes images.
-func ListAllChapters(ctx context.Context, seriesID string) ([]*models.Chapter, error) {
-	input := &dynamodb.ScanInput{
-		TableName: aws.String(database.TableChapters),
-	}
-	if seriesID != "" {
-		input.FilterExpression = aws.String("series_id = :sid")
-		input.ExpressionAttributeValues = map[string]types.AttributeValue{
+// ListAllChapters returns chapters for admin use.
+// ChaptersPage is the result of a paginated chapter query.
+type ChaptersPage struct {
+	Chapters   []*models.Chapter
+	NextCursor string // base64 token for the next page; empty if last page
+}
+
+type chapterCursorKey struct {
+	ID       string  `json:"id"`
+	SeriesID string  `json:"series_id"`
+	Number   float64 `json:"number"`
+}
+
+// ListChaptersPage fetches one page of chapters for a series using the GSI.
+// cursor is the opaque token returned by the previous page (empty for first page).
+func ListChaptersPage(ctx context.Context, seriesID string, limit int32, cursor string) (*ChaptersPage, error) {
+	qi := &dynamodb.QueryInput{
+		TableName:                aws.String(database.TableChapters),
+		IndexName:                aws.String("series_id-number-index"),
+		KeyConditionExpression:   aws.String("series_id = :sid"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":sid": &types.AttributeValueMemberS{Value: seriesID},
+		},
+		ProjectionExpression:     aws.String(chapterLiteProjection),
+		ExpressionAttributeNames: chapterLiteNames,
+		Limit:                    aws.Int32(limit),
+	}
+
+	if cursor != "" {
+		b, err := base64.StdEncoding.DecodeString(cursor)
+		if err == nil {
+			var ck chapterCursorKey
+			if err = json.Unmarshal(b, &ck); err == nil {
+				qi.ExclusiveStartKey = map[string]types.AttributeValue{
+					"id":        &types.AttributeValueMemberS{Value: ck.ID},
+					"series_id": &types.AttributeValueMemberS{Value: ck.SeriesID},
+					"number":    &types.AttributeValueMemberN{Value: fmt.Sprintf("%g", ck.Number)},
+				}
+			}
 		}
 	}
 
+	out, err := database.Client.Query(ctx, qi)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &ChaptersPage{}
+	for _, item := range out.Items {
+		var ch models.Chapter
+		if err := attributevalue.UnmarshalMap(item, &ch); err == nil {
+			result.Chapters = append(result.Chapters, &ch)
+		}
+	}
+
+	if out.LastEvaluatedKey != nil {
+		var id, sid, num string
+		if v, ok := out.LastEvaluatedKey["id"].(*types.AttributeValueMemberS); ok {
+			id = v.Value
+		}
+		if v, ok := out.LastEvaluatedKey["series_id"].(*types.AttributeValueMemberS); ok {
+			sid = v.Value
+		}
+		if v, ok := out.LastEvaluatedKey["number"].(*types.AttributeValueMemberN); ok {
+			num = v.Value
+		}
+		var numF float64
+		fmt.Sscanf(num, "%g", &numF)
+		ck := chapterCursorKey{ID: id, SeriesID: sid, Number: numF}
+		if b, err := json.Marshal(ck); err == nil {
+			result.NextCursor = base64.StdEncoding.EncodeToString(b)
+		}
+	}
+
+	return result, nil
+}
+
+// When seriesID is provided it uses the GSI (fast, no scan).
+// Without seriesID it falls back to a full table scan (slow, admin-only).
+// Pages are fetched in batches of 20 with a 500ms sleep between pages to stay
+// within the 5 RCU provisioned limit (~1.5 RCU per 20 items).
+func ListAllChapters(ctx context.Context, seriesID string) ([]*models.Chapter, error) {
+	if seriesID != "" {
+		qi := &dynamodb.QueryInput{
+			TableName:                aws.String(database.TableChapters),
+			IndexName:                aws.String("series_id-number-index"),
+			KeyConditionExpression:   aws.String("series_id = :sid"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":sid": &types.AttributeValueMemberS{Value: seriesID},
+			},
+			ProjectionExpression:     aws.String(chapterLiteProjection),
+			ExpressionAttributeNames: chapterLiteNames,
+			Limit:                    aws.Int32(20),
+		}
+		var chapters []*models.Chapter
+		first := true
+		for {
+			if !first {
+				time.Sleep(500 * time.Millisecond)
+			}
+			first = false
+			out, err := database.Client.Query(ctx, qi)
+			if err != nil {
+				return nil, err
+			}
+			for _, item := range out.Items {
+				var ch models.Chapter
+				if err = attributevalue.UnmarshalMap(item, &ch); err == nil {
+					chapters = append(chapters, &ch)
+				}
+			}
+			if out.LastEvaluatedKey == nil {
+				break
+			}
+			qi.ExclusiveStartKey = out.LastEvaluatedKey
+		}
+		sort.Slice(chapters, func(i, j int) bool {
+			return chapters[i].Number < chapters[j].Number
+		})
+		return chapters, nil
+	}
+
+	// No seriesID: full scan (infrequent admin operations only).
+	si := &dynamodb.ScanInput{
+		TableName: aws.String(database.TableChapters),
+	}
 	var chapters []*models.Chapter
 	for {
-		out, err := database.Client.Scan(ctx, input)
+		out, err := database.Client.Scan(ctx, si)
 		if err != nil {
 			return nil, err
 		}
@@ -272,9 +397,8 @@ func ListAllChapters(ctx context.Context, seriesID string) ([]*models.Chapter, e
 		if out.LastEvaluatedKey == nil {
 			break
 		}
-		input.ExclusiveStartKey = out.LastEvaluatedKey
+		si.ExclusiveStartKey = out.LastEvaluatedKey
 	}
-
 	sort.Slice(chapters, func(i, j int) bool {
 		return chapters[i].Number < chapters[j].Number
 	})
@@ -451,6 +575,30 @@ func ChapterSlugExists(ctx context.Context, slug string) (bool, error) {
 		return false, err
 	}
 	return out.Count > 0, nil
+}
+
+// GetChapterIDBySlug returns the chapter ID for the given slug, or "" if not found.
+func GetChapterIDBySlug(ctx context.Context, slug string) (string, error) {
+	out, err := database.Client.Query(ctx, &dynamodb.QueryInput{
+		TableName:              aws.String(database.TableChapters),
+		IndexName:              aws.String("slug-index"),
+		KeyConditionExpression: aws.String("slug = :slug"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":slug": &types.AttributeValueMemberS{Value: slug},
+		},
+		Limit: aws.Int32(1),
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(out.Items) == 0 {
+		return "", nil
+	}
+	var ch models.Chapter
+	if err := attributevalue.UnmarshalMap(out.Items[0], &ch); err != nil {
+		return "", err
+	}
+	return ch.ID, nil
 }
 
 // CountChapters returns approximate chapter count via DescribeTable (no RCU cost).

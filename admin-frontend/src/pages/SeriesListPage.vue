@@ -1,8 +1,18 @@
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <h1 class="text-white font-bold text-xl">Series ({{ series.length }})</h1>
-      <input v-model="search" type="text" placeholder="Search..." class="form-input max-w-xs"/>
+      <h1 class="text-white font-bold text-xl">Series ({{ total }})</h1>
+      <div class="flex items-center gap-3">
+        <button @click="deleteOrphans" :disabled="deletingOrphans"
+          class="text-xs px-3 py-1.5 bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap">
+          {{ deletingOrphans ? 'Cleaning...' : 'Clean orphan chapters' }}
+        </button>
+        <button @click="deleteEmpty" :disabled="deletingEmpty"
+          class="text-xs px-3 py-1.5 bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap">
+          {{ deletingEmpty ? 'Deleting...' : 'Delete 0-chapter series' }}
+        </button>
+        <input v-model="search" type="text" placeholder="Search..." class="form-input max-w-xs"/>
+      </div>
     </div>
 
     <div v-if="loading" class="text-gray-500 text-sm">Loading...</div>
@@ -21,10 +31,10 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-white/5">
-          <tr v-if="filtered.length === 0">
+          <tr v-if="series.length === 0">
             <td colspan="6" class="text-center text-gray-600 py-12 text-sm">No series found</td>
           </tr>
-          <tr v-for="s in filtered" :key="s.id" class="hover:bg-white/5 transition-colors">
+          <tr v-for="s in series" :key="s.id" class="hover:bg-white/5 transition-colors">
             <td class="px-4 py-3">
               <img v-if="s.cover_url" :src="s.cover_url" :alt="s.title" class="w-10 h-14 object-cover rounded" @error="imgError"/>
               <div v-else class="w-10 h-14 bg-[#12121a] rounded"/>
@@ -65,6 +75,24 @@
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Pagination -->
+    <div v-if="totalPages > 1" class="flex items-center justify-between">
+      <span class="text-xs text-gray-500">
+        {{ (page - 1) * perPage + 1 }}–{{ Math.min(page * perPage, total) }} of {{ total }} series
+      </span>
+      <div class="flex items-center gap-1">
+        <button @click="goPage(1)" :disabled="page === 1"
+          class="px-2 py-1 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">«</button>
+        <button @click="goPage(page - 1)" :disabled="page === 1"
+          class="px-3 py-1 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">‹ Prev</button>
+        <span class="px-3 py-1 text-xs text-white bg-white/10 rounded">{{ page }} / {{ totalPages }}</span>
+        <button @click="goPage(page + 1)" :disabled="page === totalPages"
+          class="px-3 py-1 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">Next ›</button>
+        <button @click="goPage(totalPages)" :disabled="page === totalPages"
+          class="px-2 py-1 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">»</button>
+      </div>
     </div>
 
     <!-- Edit Modal -->
@@ -192,58 +220,87 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import api from '@/services/api'
 
+// Series list — server-side paginated
 const series = ref<any[]>([])
 const loading = ref(true)
 const search = ref('')
+const page = ref(1)
+const totalPages = ref(1)
+const total = ref(0)
+const perPage = 15
+
+async function load() {
+  loading.value = true
+  try {
+    const res = await api.get('/admin/series', { params: { page: page.value, limit: perPage, search: search.value } })
+    series.value = res.data.data
+    totalPages.value = res.data.total_pages ?? 1
+    total.value = res.data.total ?? 0
+  } catch {} finally {
+    loading.value = false
+  }
+}
+
+watch(search, () => { page.value = 1; load() })
+
+async function goPage(p: number) {
+  page.value = p
+  await load()
+}
+
+// Delete
 const deleteTarget = ref<any>(null)
 const deleting = ref(false)
+const deletingEmpty = ref(false)
+const deletingOrphans = ref(false)
 
-// Edit state
+function pollOrphanStatus() {
+  const timer = setInterval(async () => {
+    try {
+      const res = await api.get('/admin/chapters/orphaned/status')
+      if (!res.data.running) { clearInterval(timer); deletingOrphans.value = false }
+    } catch { clearInterval(timer); deletingOrphans.value = false }
+  }, 5000)
+}
+
+async function deleteOrphans() {
+  if (!confirm('Delete all orphaned chapters? This runs in the background and takes a few minutes.')) return
+  deletingOrphans.value = true
+  try {
+    const res = await api.delete('/admin/chapters/orphaned')
+    alert(res.data.message || 'Orphan cleanup started in background.')
+    pollOrphanStatus()
+  } catch (e: any) {
+    const msg = e.response?.data?.error || e.message
+    alert(msg)
+    if (e.response?.status !== 409) deletingOrphans.value = false
+    else pollOrphanStatus()
+  }
+}
+
+async function deleteEmpty() {
+  if (!confirm('Delete all series with 0 chapters?')) return
+  deletingEmpty.value = true
+  try {
+    const res = await api.delete('/admin/series/empty')
+    alert(`Deleted ${res.data.deleted} empty series.`)
+    page.value = 1
+    await load()
+  } catch (e: any) {
+    alert('Failed: ' + (e.response?.data?.error || e.message))
+  } finally {
+    deletingEmpty.value = false
+  }
+}
+
+// Edit
 const editTarget = ref<any>(null)
 const editSaving = ref(false)
 const editError = ref('')
 const editForm = ref({ title: '', language: 'en', author: '', genres: '', description: '' })
-
-// Rescrape state
-const rescraping = ref<string | null>(null)
-
-async function rescrapeImages(s: any) {
-  if (!confirm(`Re-scrape all chapter images for "${s.title}"? This may take a while.`)) return
-  rescraping.value = s.id
-  try {
-    const res = await api.post('/admin/import/mangaboost/rescrape', { series_id: s.id })
-    alert(`✓ Done: ${res.data.updated} chapters updated, ${res.data.failed} failed.`)
-  } catch (e: any) {
-    alert('Failed: ' + (e.response?.data?.error || e.message))
-  } finally {
-    rescraping.value = null
-  }
-}
-
-// Sync state
-const syncTarget = ref<any>(null)
-const syncLoading = ref(false)
-const syncSaving = ref(false)
-const syncError = ref('')
-const syncImages = ref(false)
-const previewChapters = ref<any[]>([])
-const selectedSlugs = ref(new Set<string>())
-
-const filtered = computed(() => {
-  if (!search.value) return series.value
-  const q = search.value.toLowerCase()
-  return series.value.filter(s => s.title.toLowerCase().includes(q) || s.slug.toLowerCase().includes(q))
-})
-
-const newChapters = computed(() => previewChapters.value.filter(c => !c.exists))
-const existingCount = computed(() => previewChapters.value.filter(c => c.exists).length)
-const allNewSelected = computed(() => newChapters.value.length > 0 && newChapters.value.every(c => selectedSlugs.value.has(c.slug)))
-
-function imgError(e: Event) { (e.target as HTMLImageElement).style.display = 'none' }
-function confirmDelete(s: any) { deleteTarget.value = s }
 
 function openEdit(s: any) {
   editTarget.value = s
@@ -266,97 +323,91 @@ async function doEdit() {
   }
 }
 
+// Rescrape
+const rescraping = ref<string | null>(null)
+async function rescrapeImages(s: any) {
+  if (!confirm(`Re-scrape all chapter images for "${s.title}"? This may take a while.`)) return
+  rescraping.value = s.id
+  try {
+    const res = await api.post('/admin/import/mangaboost/rescrape', { series_id: s.id })
+    alert(`✓ Done: ${res.data.updated} chapters updated, ${res.data.failed} failed.`)
+  } catch (e: any) {
+    alert('Failed: ' + (e.response?.data?.error || e.message))
+  } finally {
+    rescraping.value = null
+  }
+}
+
+// Sync
+const syncTarget = ref<any>(null)
+const syncLoading = ref(false)
+const syncSaving = ref(false)
+const syncError = ref('')
+const syncImages = ref(false)
+const previewChapters = ref<any[]>([])
+const selectedSlugs = ref(new Set<string>())
+const newChapters = computed(() => previewChapters.value.filter(c => !c.exists))
+const existingCount = computed(() => previewChapters.value.filter(c => c.exists).length)
+const allNewSelected = computed(() => newChapters.value.length > 0 && newChapters.value.every(c => selectedSlugs.value.has(c.slug)))
+
 function toggleChapter(slug: string) {
   const set = new Set(selectedSlugs.value)
   if (set.has(slug)) set.delete(slug)
   else set.add(slug)
   selectedSlugs.value = set
 }
-
 function toggleAll() {
-  if (allNewSelected.value) {
-    selectedSlugs.value = new Set()
-  } else {
-    selectedSlugs.value = new Set(newChapters.value.map(c => c.slug))
-  }
+  selectedSlugs.value = allNewSelected.value ? new Set() : new Set(newChapters.value.map(c => c.slug))
 }
-
 async function openSync(s: any) {
-  syncTarget.value = s
-  syncLoading.value = true
-  syncError.value = ''
-  previewChapters.value = []
-  selectedSlugs.value = new Set()
-
+  syncTarget.value = s; syncLoading.value = true; syncError.value = ''
+  previewChapters.value = []; selectedSlugs.value = new Set()
   try {
     const res = await api.post('/admin/import/preview', { series_id: s.id })
     previewChapters.value = res.data.chapters
-    // Pre-select all new (not yet imported) chapters
     selectedSlugs.value = new Set(res.data.chapters.filter((c: any) => !c.exists).map((c: any) => c.slug))
   } catch (e: any) {
     syncError.value = e.response?.data?.error || e.message || 'Failed to fetch chapters'
-  } finally {
-    syncLoading.value = false
-  }
+  } finally { syncLoading.value = false }
 }
-
 function closeSync() {
-  syncTarget.value = null
-  previewChapters.value = []
-  selectedSlugs.value = new Set()
-  syncError.value = ''
+  syncTarget.value = null; previewChapters.value = []; selectedSlugs.value = new Set(); syncError.value = ''
 }
-
 async function doSync() {
   if (!syncTarget.value || selectedSlugs.value.size === 0) return
   syncSaving.value = true
   try {
     const res = await api.post('/admin/import/selected', {
-      series_id: syncTarget.value.id,
-      slugs: Array.from(selectedSlugs.value),
-      scrape_images: syncImages.value,
+      series_id: syncTarget.value.id, slugs: Array.from(selectedSlugs.value), scrape_images: syncImages.value,
     })
     const saved = res.data.chapters_saved
-    // Update chapter count in table
     const s = series.value.find(x => x.id === syncTarget.value.id)
     if (s) s.chapter_count += saved
     closeSync()
     alert(`✓ ${saved} chapter${saved !== 1 ? 's' : ''} imported.`)
   } catch (e: any) {
     syncError.value = e.response?.data?.error || e.message || 'Import failed'
-  } finally {
-    syncSaving.value = false
-  }
+  } finally { syncSaving.value = false }
 }
 
 async function toggleStatus(s: any) {
   const newStatus = s.status === 'ongoing' ? 'completed' : 'ongoing'
-  try {
-    await api.put(`/admin/series/${s.id}`, { status: newStatus })
-    s.status = newStatus
-  } catch {}
+  try { await api.put(`/admin/series/${s.id}`, { status: newStatus }); s.status = newStatus } catch {}
 }
 
+function confirmDelete(s: any) { deleteTarget.value = s }
 async function doDelete() {
   if (!deleteTarget.value) return
   deleting.value = true
   try {
     await api.delete(`/admin/series/${deleteTarget.value.id}`)
     series.value = series.value.filter(s => s.id !== deleteTarget.value.id)
+    total.value--
     deleteTarget.value = null
-  } catch {} finally {
-    deleting.value = false
-  }
+  } catch {} finally { deleting.value = false }
 }
 
-async function load() {
-  loading.value = true
-  try {
-    const res = await api.get('/admin/series')
-    series.value = res.data.data
-  } catch {} finally {
-    loading.value = false
-  }
-}
+function imgError(e: Event) { (e.target as HTMLImageElement).style.display = 'none' }
+
 onMounted(load)
 </script>

@@ -6,11 +6,16 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"mhentai-backend/internal/database"
 	"mhentai-backend/internal/models"
 	"mhentai-backend/internal/repository"
 	"mhentai-backend/internal/scraper"
@@ -18,6 +23,57 @@ import (
 )
 
 var slugRe = regexp.MustCompile(`[^a-z0-9-]+`)
+
+var orphanCleanupRunning = false
+
+var (
+	dedupRunning     = false
+	dedupLastDeleted = -1 // -1 = never run; >= 0 after last run
+)
+
+// AdminDedupStatus GET /api/admin/chapters/duplicates/status
+func AdminDedupStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"running": dedupRunning, "last_deleted": dedupLastDeleted})
+}
+
+// ImportJob tracks the progress of a background chapter import.
+type ImportJob struct {
+	Running  bool      `json:"running"`
+	Total    int       `json:"total"`
+	Done     int       `json:"done"`
+	Saved    int       `json:"saved"`
+	Skipped  int       `json:"skipped"`
+	Failed   []float64 `json:"failed"`
+	SeriesID string    `json:"series_id"`
+	Title    string    `json:"title"`
+}
+
+var (
+	importJobsMu sync.RWMutex
+	importJobs   = map[string]*ImportJob{}
+)
+
+// AdminImportStatus GET /api/admin/import/status?job_id=X
+func AdminImportStatus(c *gin.Context) {
+	jobID := c.Query("job_id")
+	importJobsMu.RLock()
+	job, ok := importJobs[jobID]
+	var resp ImportJob
+	if ok {
+		resp = *job
+	}
+	importJobsMu.RUnlock()
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// AdminOrphanCleanupStatus GET /api/admin/chapters/orphaned/status
+func AdminOrphanCleanupStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"running": orphanCleanupRunning})
+}
 
 func makeSlug(title string) string {
 	s := strings.ToLower(title)
@@ -52,17 +108,33 @@ func AdminGetRecentSeries(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": result.Items})
 }
 
-// AdminListSeries GET /api/admin/series
+// AdminListSeries GET /api/admin/series?page=1&limit=15&search=
 func AdminListSeries(c *gin.Context) {
+	page := 1
+	limit := 15
+	fmt.Sscanf(c.DefaultQuery("page", "1"), "%d", &page)
+	fmt.Sscanf(c.DefaultQuery("limit", "15"), "%d", &limit)
+	search := c.Query("search")
+
 	result, err := repository.ListSeriesPage(c.Request.Context(), repository.ListSeriesParams{
-		SortBy: "updated_at",
-		Limit:  200,
-	}, 1)
+		SortBy:  "updated_at",
+		Limit:   limit,
+		Search:  search,
+	}, page)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": result.Items})
+	totalPages := 0
+	if limit > 0 {
+		totalPages = (result.Total + limit - 1) / limit
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"data":        result.Items,
+		"total":       result.Total,
+		"page":        page,
+		"total_pages": totalPages,
+	})
 }
 
 // AdminUpdateSeries PUT /api/admin/series/:id
@@ -174,6 +246,144 @@ func AdminCreateChapter(c *gin.Context) {
 	c.JSON(http.StatusOK, ch)
 }
 
+// AdminDeleteOrphanedChapters DELETE /api/admin/chapters/orphaned
+// Starts cleanup in the background (returns immediately) to avoid DynamoDB throttle.
+// Scans 5 items per page with 2s delay — safe for 5 RCU provisioned tables.
+func AdminDeleteOrphanedChapters(c *gin.Context) {
+	if orphanCleanupRunning {
+		c.JSON(http.StatusConflict, gin.H{"error": "Cleanup is already running, please wait."})
+		return
+	}
+	orphanCleanupRunning = true
+	ctx := context.Background()
+	go func() {
+		defer func() { orphanCleanupRunning = false }()
+		seriesCache := map[string]bool{}
+		si := &dynamodb.ScanInput{
+			TableName:            aws.String(database.TableChapters),
+			ProjectionExpression: aws.String("id, series_id"),
+			Limit:                aws.Int32(5),
+		}
+		for {
+			out, err := database.Client.Scan(ctx, si)
+			if err != nil {
+				return
+			}
+			for _, item := range out.Items {
+				var ch models.Chapter
+				if err := attributevalue.UnmarshalMap(item, &ch); err != nil {
+					continue
+				}
+				if ch.SeriesID == "" {
+					_ = repository.DeleteChapter(ctx, ch.ID)
+					continue
+				}
+				exists, ok := seriesCache[ch.SeriesID]
+				if !ok {
+					_, serr := repository.GetSeriesByID(ctx, ch.SeriesID)
+					exists = serr == nil
+					seriesCache[ch.SeriesID] = exists
+				}
+				if !exists {
+					_ = repository.DeleteChapter(ctx, ch.ID)
+				}
+			}
+			if out.LastEvaluatedKey == nil {
+				break
+			}
+			si.ExclusiveStartKey = out.LastEvaluatedKey
+			time.Sleep(2 * time.Second)
+		}
+	}()
+	c.JSON(http.StatusAccepted, gin.H{"message": "Orphan cleanup started in background. It will finish in a few minutes."})
+}
+
+// AdminDeduplicateChapters DELETE /api/admin/chapters/duplicates?series_id=X
+// Starts dedup in the background (returns 202 immediately) to avoid DynamoDB throttle.
+// Poll GET /api/admin/chapters/duplicates/status for completion.
+func AdminDeduplicateChapters(c *gin.Context) {
+	seriesID := c.Query("series_id")
+	if seriesID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "series_id required"})
+		return
+	}
+	if dedupRunning {
+		c.JSON(http.StatusConflict, gin.H{"error": "Dedup is already running, please wait."})
+		return
+	}
+	dedupRunning = true
+	dedupLastDeleted = -1
+	ctx := context.Background()
+	go func() {
+		defer func() { dedupRunning = false }()
+
+		chapters, err := repository.ListAllChapters(ctx, seriesID)
+		if err != nil {
+			return
+		}
+
+		byNumber := map[float64][]*models.Chapter{}
+		for _, ch := range chapters {
+			byNumber[ch.Number] = append(byNumber[ch.Number], ch)
+		}
+
+		deleted := 0
+		for _, group := range byNumber {
+			if len(group) <= 1 {
+				continue
+			}
+			best := group[0]
+			for _, ch := range group[1:] {
+				if len(ch.Images) > len(best.Images) ||
+					(len(ch.Images) == len(best.Images) && ch.CreatedAt > best.CreatedAt) {
+					best = ch
+				}
+			}
+			for _, ch := range group {
+				if ch.ID == best.ID {
+					continue
+				}
+				_ = repository.DeleteChapter(ctx, ch.ID)
+				deleted++
+				time.Sleep(200 * time.Millisecond)
+			}
+		}
+
+		if deleted > 0 {
+			remaining, _ := repository.ListAllChapters(ctx, seriesID)
+			_ = repository.UpdateSeriesFields(ctx, seriesID, map[string]interface{}{
+				"chapter_count": len(remaining),
+			})
+		}
+		dedupLastDeleted = deleted
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{"message": "Dedup started in background."})
+}
+
+// AdminDeleteEmptySeries DELETE /api/admin/series/empty
+// Deletes all series that are garbage: 0 chapters, empty title, or invalid slug ("/", "").
+func AdminDeleteEmptySeries(c *gin.Context) {
+	all, err := repository.ListSeriesPage(c.Request.Context(), repository.ListSeriesParams{Limit: 500}, 1)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	deleted := 0
+	for _, s := range all.Items {
+		isGarbage := s.ChapterCount == 0 ||
+			s.Title == "" || s.Title == "/" ||
+			s.Slug == "" || s.Slug == "/"
+		if isGarbage {
+			_ = repository.DeleteChaptersBySeries(c.Request.Context(), s.ID)
+			if err := repository.DeleteSeries(c.Request.Context(), s.ID); err == nil {
+				deleted++
+			}
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": deleted})
+}
+
 // AdminDeleteSeries DELETE /api/admin/series/:id
 func AdminDeleteSeries(c *gin.Context) {
 	id := c.Param("id")
@@ -186,23 +396,34 @@ func AdminDeleteSeries(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// AdminListChapters GET /api/admin/chapters?series_id=X
+// AdminListChapters GET /api/admin/chapters?series_id=X&cursor=&limit=20
 func AdminListChapters(c *gin.Context) {
-	chapters, err := repository.ListAllChapters(c.Request.Context(), c.Query("series_id"))
+	seriesID := c.Query("series_id")
+	if seriesID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "series_id required"})
+		return
+	}
+	cursor := c.Query("cursor")
+	limit := int32(20)
+
+	page, err := repository.ListChaptersPage(c.Request.Context(), seriesID, limit, cursor)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// Attach image count
+
 	type chapterRow struct {
 		models.Chapter
 		ImageCount int `json:"image_count"`
 	}
-	rows := make([]chapterRow, 0, len(chapters))
-	for _, ch := range chapters {
+	rows := make([]chapterRow, 0, len(page.Chapters))
+	for _, ch := range page.Chapters {
 		rows = append(rows, chapterRow{Chapter: *ch, ImageCount: len(ch.Images)})
 	}
-	c.JSON(http.StatusOK, gin.H{"data": rows})
+	c.JSON(http.StatusOK, gin.H{
+		"data":        rows,
+		"next_cursor": page.NextCursor,
+	})
 }
 
 // AdminDeleteChapter DELETE /api/admin/chapters/:id
@@ -245,8 +466,17 @@ func AdminPresignUpload(c *gin.Context) {
 
 // ImportRequest is the body for POST /api/admin/import
 type ImportRequest struct {
-	URL           string   `json:"url" binding:"required"`
-	SelectedSlugs []string `json:"selected_slugs"` // if set, only import these chapters
+	URL              string               `json:"url" binding:"required"`
+	SelectedChapters []ImportChapterInput `json:"selected_chapters"` // chapter data from preview, used directly
+	SelectedSlugs    []string             `json:"selected_slugs"`    // fallback: filter re-scraped list by slug
+	Force            bool                 `json:"force"`             // overwrite existing chapters instead of skipping
+}
+
+type ImportChapterInput struct {
+	Slug   string  `json:"slug"`
+	Title  string  `json:"title"`
+	Number float64 `json:"number"`
+	URL    string  `json:"url"`
 }
 
 // AdminImport POST /api/admin/import
@@ -285,11 +515,15 @@ func AdminImport(c *gin.Context) {
 		}
 	}
 
+	newlyCreated := false
 	if series == nil {
-		// Unique slug
 		baseSlug := info.Slug
 		if baseSlug == "" {
 			baseSlug = makeSlug(info.Title)
+		}
+		if baseSlug == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "could not derive a slug from the series title"})
+			return
 		}
 		slug := baseSlug
 		for i := 1; ; i++ {
@@ -300,7 +534,6 @@ func AdminImport(c *gin.Context) {
 			slug = fmt.Sprintf("%s-%d", baseSlug, i)
 		}
 
-		// Always upload cover to R2
 		coverURL := info.CoverURL
 		if storage.R2 != nil && storage.R2.Enabled() && coverURL != "" {
 			key := storage.CoverKey(slug, coverURL)
@@ -325,6 +558,7 @@ func AdminImport(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("saving series: %v", err)})
 			return
 		}
+		newlyCreated = true
 	} else {
 		// Existing series found; update metadata if changed.
 		_ = repository.UpdateSeriesFields(c.Request.Context(), series.ID, map[string]interface{}{
@@ -337,72 +571,118 @@ func AdminImport(c *gin.Context) {
 		})
 	}
 
-	// Build selected slugs set (empty = import all)
-	selectedSlugs := make(map[string]bool, len(req.SelectedSlugs))
-	for _, s := range req.SelectedSlugs {
-		selectedSlugs[s] = true
+	// Build chapter list to import.
+	// If the frontend sent selected_chapters (full data from preview), use those directly.
+	// This avoids slug mismatch between the preview scrape and the import re-scrape.
+	type chapterEntry struct {
+		Slug  string
+		Title string
+		Num   float64
+		URL   string
 	}
-
-	savedChapters, skippedChapters := 0, 0
-	seriesSlug := series.Slug
-	for _, ch := range info.Chapters {
-		chSlug := ch.Slug
-		if chSlug == "" {
-			chSlug = fmt.Sprintf("%s-chapter-%.0f", seriesSlug, ch.Number)
+	var toImport []chapterEntry
+	if len(req.SelectedChapters) > 0 {
+		for _, c := range req.SelectedChapters {
+			toImport = append(toImport, chapterEntry{c.Slug, c.Title, c.Number, c.URL})
 		}
-		// Skip if not in selection (when selection is provided)
-		if len(selectedSlugs) > 0 && !selectedSlugs[chSlug] {
-			skippedChapters++
-			continue
+	} else {
+		selectedSlugs := make(map[string]bool, len(req.SelectedSlugs))
+		for _, s := range req.SelectedSlugs {
+			selectedSlugs[s] = true
 		}
-		// If slug exists but under a different series, move it to this series
-		if existing, _ := repository.GetChapterBySlug(c.Request.Context(), chSlug); existing != nil {
-			if existing.SeriesID == series.ID {
-				skippedChapters++
+		seriesSlug := series.Slug
+		for _, ch := range info.Chapters {
+			chSlug := ch.Slug
+			if chSlug == "" {
+				chSlug = fmt.Sprintf("%s-chapter-%.0f", seriesSlug, ch.Number)
+			}
+			if len(selectedSlugs) > 0 && !selectedSlugs[chSlug] {
 				continue
 			}
-			// Orphaned chapter — reassign to current series
-			_ = repository.UpdateSeriesFields(c.Request.Context(), existing.ID, map[string]interface{}{
-				"series_id": series.ID,
-				"language":  "en",
-			})
-			savedChapters++
-			continue
+			toImport = append(toImport, chapterEntry{chSlug, ch.Title, ch.Number, ch.URL})
 		}
-
-		chapter := &models.Chapter{
-			ID:        uuid.NewString(),
-			SeriesID:  series.ID,
-			Slug:      chSlug,
-			Title:     ch.Title,
-			Number:    ch.Number,
-			Language:  "en",
-			SourceURL: ch.URL,
-		}
-
-		// Always scrape images and upload to R2
-		if ch.URL != "" {
-			chapter.Images = scrapeAndOptionallyProxy(c.Request.Context(), ch.URL, seriesSlug, chSlug, true)
-			time.Sleep(500 * time.Millisecond) // be polite between chapter fetches
-		}
-
-		if err := repository.PutChapter(c.Request.Context(), chapter); err != nil {
-			continue
-		}
-		savedChapters++
 	}
 
-	// Update chapter count relative to the existing series count.
-	_ = repository.UpdateSeriesFields(c.Request.Context(), series.ID, map[string]interface{}{
-		"chapter_count": series.ChapterCount + savedChapters,
-	})
-	series.ChapterCount += savedChapters
+	if len(toImport) == 0 {
+		if newlyCreated {
+			_ = repository.DeleteSeries(c.Request.Context(), series.ID)
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "series": nil, "chapters_saved": 0, "chapters_skipped": 0, "chapters_failed": []float64{}})
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success":          true,
-		"series":           series,
-		"chapters_saved":   savedChapters,
-		"chapters_skipped": skippedChapters,
+	jobID := uuid.NewString()
+	job := &ImportJob{
+		Running:  true,
+		Total:    len(toImport),
+		Failed:   []float64{},
+		SeriesID: series.ID,
+		Title:    series.Title,
+	}
+	importJobsMu.Lock()
+	importJobs[jobID] = job
+	importJobsMu.Unlock()
+
+	bgCtx := context.Background()
+	seriesSlug := series.Slug
+	seriesChapterCount := series.ChapterCount
+	force := req.Force
+	go func() {
+		defer func() {
+			importJobsMu.Lock()
+			job.Running = false
+			importJobsMu.Unlock()
+		}()
+		for _, ch := range toImport {
+			chSlug := ch.Slug
+			if chSlug == "" {
+				chSlug = fmt.Sprintf("%s-chapter-%.0f", seriesSlug, ch.Num)
+			}
+			existingID, _ := repository.GetChapterIDBySlug(bgCtx, chSlug)
+			if existingID != "" {
+				if !force {
+					importJobsMu.Lock()
+					job.Skipped++
+					job.Done++
+					importJobsMu.Unlock()
+					continue
+				}
+				_ = repository.DeleteChapter(bgCtx, existingID)
+			}
+			chapter := &models.Chapter{
+				ID:        uuid.NewString(),
+				SeriesID:  series.ID,
+				Slug:      chSlug,
+				Title:     ch.Title,
+				Number:    ch.Num,
+				Language:  "en",
+				SourceURL: ch.URL,
+			}
+			if ch.URL != "" {
+				chapter.Images = scrapeAndOptionallyProxy(bgCtx, ch.URL, seriesSlug, chSlug, true)
+				time.Sleep(500 * time.Millisecond)
+			}
+			importJobsMu.Lock()
+			if err := repository.PutChapter(bgCtx, chapter); err != nil {
+				job.Failed = append(job.Failed, ch.Num)
+			} else {
+				job.Saved++
+			}
+			job.Done++
+			importJobsMu.Unlock()
+		}
+		importJobsMu.RLock()
+		saved := job.Saved
+		importJobsMu.RUnlock()
+		_ = repository.UpdateSeriesFields(bgCtx, series.ID, map[string]interface{}{
+			"chapter_count": seriesChapterCount + saved,
+		})
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"job_id": jobID,
+		"series": series,
+		"total":  len(toImport),
 	})
 }
 
@@ -776,8 +1056,10 @@ func AdminPreviewMangaBoost(c *gin.Context) {
 // Imports a mangaboost.com series (optionally only selected chapters).
 func AdminImportMangaBoost(c *gin.Context) {
 	var req struct {
-		URL           string   `json:"url" binding:"required"`
-		SelectedSlugs []string `json:"selected_slugs"`
+		URL              string               `json:"url" binding:"required"`
+		SelectedChapters []ImportChapterInput `json:"selected_chapters"`
+		SelectedSlugs    []string             `json:"selected_slugs"`
+		Force            bool                 `json:"force"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -862,71 +1144,116 @@ func AdminImportMangaBoost(c *gin.Context) {
 		})
 	}
 
-	selectedSlugs := make(map[string]bool, len(req.SelectedSlugs))
-	for _, s := range req.SelectedSlugs {
-		selectedSlugs[s] = true
+	// Build chapter list: prefer selected_chapters from preview (avoids slug mismatch),
+	// fall back to filtering the freshly scraped list by selected_slugs.
+	type mbEntry struct {
+		Slug  string
+		Title string
+		Num   float64
+		URL   string
 	}
-
-	savedChapters, skippedChapters := 0, 0
-	seriesSlug := series.Slug
-	for _, ch := range info.Chapters {
-		chSlug := ch.Slug
-		if chSlug == "" {
-			chSlug = fmt.Sprintf("%s-chapter-%.0f", seriesSlug, ch.Number)
+	var mbToImport []mbEntry
+	if len(req.SelectedChapters) > 0 {
+		for _, c := range req.SelectedChapters {
+			mbToImport = append(mbToImport, mbEntry{c.Slug, c.Title, c.Number, c.URL})
 		}
-		if len(selectedSlugs) > 0 && !selectedSlugs[chSlug] {
-			skippedChapters++
-			continue
+	} else {
+		selectedSlugs := make(map[string]bool, len(req.SelectedSlugs))
+		for _, s := range req.SelectedSlugs {
+			selectedSlugs[s] = true
 		}
-		// If slug exists but under a different series, move it to this series
-		if existing, _ := repository.GetChapterBySlug(c.Request.Context(), chSlug); existing != nil {
-			if existing.SeriesID == series.ID {
-				skippedChapters++
+		for _, ch := range info.Chapters {
+			chSlug := ch.Slug
+			if chSlug == "" {
+				chSlug = fmt.Sprintf("%s-chapter-%.0f", series.Slug, ch.Number)
+			}
+			if len(selectedSlugs) > 0 && !selectedSlugs[chSlug] {
 				continue
 			}
-			// Orphaned chapter — reassign to current series
-			_ = repository.UpdateSeriesFields(c.Request.Context(), existing.ID, map[string]interface{}{
-				"series_id": series.ID,
-				"language":  "my",
-			})
-			savedChapters++
-			continue
+			mbToImport = append(mbToImport, mbEntry{chSlug, ch.Title, ch.Number, ch.URL})
 		}
-
-		chapter := &models.Chapter{
-			ID:        uuid.NewString(),
-			SeriesID:  series.ID,
-			Slug:      chSlug,
-			Title:     ch.Title,
-			Number:    ch.Number,
-			Language:  "my",
-			SourceURL: ch.URL,
-		}
-
-		if ch.URL != "" {
-			imgs, imgErr := scraper.ScrapeMangaBoostChapterImages(ch.URL)
-			if imgErr == nil && len(imgs) > 0 {
-				chapter.Images = imgs
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
-
-		if err := repository.PutChapter(c.Request.Context(), chapter); err != nil {
-			continue
-		}
-		savedChapters++
 	}
 
-	_ = repository.UpdateSeriesFields(c.Request.Context(), series.ID, map[string]interface{}{
-		"chapter_count": series.ChapterCount + savedChapters,
-	})
-	series.ChapterCount += savedChapters
+	if len(mbToImport) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": true, "series": nil, "chapters_saved": 0, "chapters_skipped": 0, "chapters_failed": []float64{}})
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success":          true,
-		"series":           series,
-		"chapters_saved":   savedChapters,
-		"chapters_skipped": skippedChapters,
+	jobID := uuid.NewString()
+	job := &ImportJob{
+		Running:  true,
+		Total:    len(mbToImport),
+		Failed:   []float64{},
+		SeriesID: series.ID,
+		Title:    series.Title,
+	}
+	importJobsMu.Lock()
+	importJobs[jobID] = job
+	importJobsMu.Unlock()
+
+	bgCtx := context.Background()
+	seriesSlug := series.Slug
+	seriesChapterCount := series.ChapterCount
+	force := req.Force
+	go func() {
+		defer func() {
+			importJobsMu.Lock()
+			job.Running = false
+			importJobsMu.Unlock()
+		}()
+		for _, ch := range mbToImport {
+			chSlug := ch.Slug
+			if chSlug == "" {
+				chSlug = fmt.Sprintf("%s-chapter-%.0f", seriesSlug, ch.Num)
+			}
+			existingID, _ := repository.GetChapterIDBySlug(bgCtx, chSlug)
+			if existingID != "" {
+				if !force {
+					importJobsMu.Lock()
+					job.Skipped++
+					job.Done++
+					importJobsMu.Unlock()
+					continue
+				}
+				_ = repository.DeleteChapter(bgCtx, existingID)
+			}
+			chapter := &models.Chapter{
+				ID:        uuid.NewString(),
+				SeriesID:  series.ID,
+				Slug:      chSlug,
+				Title:     ch.Title,
+				Number:    ch.Num,
+				Language:  "my",
+				SourceURL: ch.URL,
+			}
+			if ch.URL != "" {
+				imgs, imgErr := scraper.ScrapeMangaBoostChapterImages(ch.URL)
+				if imgErr == nil && len(imgs) > 0 {
+					chapter.Images = imgs
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+			importJobsMu.Lock()
+			if err := repository.PutChapter(bgCtx, chapter); err != nil {
+				job.Failed = append(job.Failed, ch.Num)
+			} else {
+				job.Saved++
+			}
+			job.Done++
+			importJobsMu.Unlock()
+		}
+		importJobsMu.RLock()
+		saved := job.Saved
+		importJobsMu.RUnlock()
+		_ = repository.UpdateSeriesFields(bgCtx, series.ID, map[string]interface{}{
+			"chapter_count": seriesChapterCount + saved,
+		})
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"job_id": jobID,
+		"series": series,
+		"total":  len(mbToImport),
 	})
 }
 

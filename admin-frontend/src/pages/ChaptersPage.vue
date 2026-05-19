@@ -9,7 +9,7 @@
         <div v-if="seriesLoading" class="p-4 text-gray-500 text-sm">Loading...</div>
         <div v-else-if="filteredSeries.length === 0" class="p-4 text-gray-600 text-sm">No series found</div>
         <button
-          v-for="s in filteredSeries"
+          v-for="s in paginatedSeries"
           :key="s.id"
           @click="selectSeries(s)"
           :class="[
@@ -25,6 +25,15 @@
             <p class="text-xs text-gray-600">{{ s.chapter_count }} chapters</p>
           </div>
         </button>
+      </div>
+
+      <!-- Series pagination -->
+      <div v-if="seriesTotalPages > 1" class="flex items-center justify-between px-1">
+        <button @click="seriesPage--" :disabled="seriesPage === 1"
+          class="px-2 py-1 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">‹ Prev</button>
+        <span class="text-xs text-gray-500">{{ seriesPage }} / {{ seriesTotalPages }}</span>
+        <button @click="seriesPage++" :disabled="seriesPage === seriesTotalPages"
+          class="px-2 py-1 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">Next ›</button>
       </div>
     </div>
 
@@ -46,9 +55,13 @@
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 class="text-white font-bold text-lg">{{ selectedSeries.title }}</h2>
-            <p class="text-gray-500 text-xs mt-0.5">{{ chapters.length }} chapters</p>
+            <p class="text-gray-500 text-xs mt-0.5">{{ selectedSeries.chapter_count }} chapters · page {{ chapterPage }}</p>
           </div>
           <div class="flex items-center gap-2">
+            <button @click="doDedup" :disabled="deduping"
+              class="text-xs px-3 py-1.5 bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap">
+              {{ deduping ? 'Removing...' : 'Remove Duplicates' }}
+            </button>
             <button @click="doScrapeAllImages" :disabled="bulkScraping"
               class="text-xs px-3 py-1.5 bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap">
               {{ bulkScraping ? `Scraping ${bulkProgress}/${bulkTotal}...` : 'Get All Images' }}
@@ -103,6 +116,18 @@
             </tbody>
           </table>
         </div>
+
+        <!-- Pagination -->
+        <div v-if="chapterPage > 1 || chapterHasMore" class="flex items-center justify-between">
+          <span class="text-xs text-gray-500">Page {{ chapterPage }}</span>
+          <div class="flex items-center gap-1">
+            <button @click="chapterPagePrev" :disabled="chapterPage === 1 || chaptersLoading"
+              class="px-3 py-1 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">‹ Prev</button>
+            <span class="px-3 py-1 text-xs text-white bg-white/10 rounded">{{ chapterPage }}</span>
+            <button @click="chapterPageNext" :disabled="!chapterHasMore || chaptersLoading"
+              class="px-3 py-1 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">Next ›</button>
+          </div>
+        </div>
       </template>
     </div>
 
@@ -127,7 +152,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import api from '@/services/api'
 
 // Series panel
@@ -135,27 +160,25 @@ const seriesList = ref<any[]>([])
 const seriesLoading = ref(true)
 const seriesSearch = ref('')
 const selectedSeries = ref<any>(null)
-
-// Chapters panel
-const chapters = ref<any[]>([])
-const chaptersLoading = ref(false)
-const chapterSearch = ref('')
-const scrapingId = ref<string | null>(null)
-
-// Bulk scrape
-const bulkScraping = ref(false)
-const bulkProgress = ref(0)
-const bulkTotal = ref(0)
-
-// Delete
-const deleteTarget = ref<any>(null)
-const deleting = ref(false)
-
+const seriesPage = ref(1)
+const seriesPerPage = 15
 const filteredSeries = computed(() => {
   if (!seriesSearch.value) return seriesList.value
   const q = seriesSearch.value.toLowerCase()
   return seriesList.value.filter(s => s.title.toLowerCase().includes(q))
 })
+const seriesTotalPages = computed(() => Math.ceil(filteredSeries.value.length / seriesPerPage))
+const paginatedSeries = computed(() => filteredSeries.value.slice((seriesPage.value - 1) * seriesPerPage, seriesPage.value * seriesPerPage))
+watch(seriesSearch, () => { seriesPage.value = 1 })
+
+// Chapters panel — server-side paginated
+const chapters = ref<any[]>([])
+const chaptersLoading = ref(false)
+const chapterSearch = ref('')
+const scrapingId = ref<string | null>(null)
+const chapterPage = ref(1)
+const chapterCursors = ref<string[]>(['']) // cursors[page-1] = cursor needed to fetch that page
+const chapterHasMore = ref(false)
 
 const filteredChapters = computed(() => {
   if (!chapterSearch.value) return chapters.value
@@ -163,22 +186,57 @@ const filteredChapters = computed(() => {
   return chapters.value.filter(c => c.title.toLowerCase().includes(q) || String(c.number).includes(q))
 })
 
+// Bulk scrape
+const bulkScraping = ref(false)
+const bulkProgress = ref(0)
+const bulkTotal = ref(0)
+
+// Dedup
+const deduping = ref(false)
+
+// Delete
+const deleteTarget = ref<any>(null)
+const deleting = ref(false)
+
 function imgError(e: Event) { (e.target as HTMLImageElement).style.display = 'none' }
+
+async function fetchChaptersPage(seriesId: string, page: number) {
+  chaptersLoading.value = true
+  chapters.value = []
+  try {
+    const cursor = chapterCursors.value[page - 1] ?? ''
+    const res = await api.get('/admin/chapters', { params: { series_id: seriesId, cursor } })
+    chapters.value = (res.data.data as any[]).map(ch => ({ ...ch, image_count: ch.image_count ?? 0 }))
+    const next = res.data.next_cursor ?? ''
+    chapterHasMore.value = !!next
+    // Store cursor for the next page if we don't have it yet
+    if (next && !chapterCursors.value[page]) {
+      chapterCursors.value[page] = next
+    }
+  } catch {} finally {
+    chaptersLoading.value = false
+  }
+}
 
 async function selectSeries(s: any) {
   selectedSeries.value = s
   chapterSearch.value = ''
-  chaptersLoading.value = true
-  chapters.value = []
-  try {
-    const res = await api.get('/admin/chapters', { params: { series_id: s.id } })
-    chapters.value = (res.data.data as any[]).map(ch => ({
-      ...ch,
-      image_count: ch.image_count ?? 0,
-    }))
-  } catch {} finally {
-    chaptersLoading.value = false
-  }
+  chapterPage.value = 1
+  chapterCursors.value = ['']
+  chapterHasMore.value = false
+  await fetchChaptersPage(s.id, 1)
+}
+
+async function chapterPageNext() {
+  if (!chapterHasMore.value || !selectedSeries.value) return
+  chapterPage.value++
+  await fetchChaptersPage(selectedSeries.value.id, chapterPage.value)
+}
+
+async function chapterPagePrev() {
+  if (chapterPage.value <= 1 || !selectedSeries.value) return
+  chapterPage.value--
+  await fetchChaptersPage(selectedSeries.value.id, chapterPage.value)
 }
 
 async function doScrapeImages(ch: any) {
@@ -198,28 +256,49 @@ async function doScrapeImages(ch: any) {
 
 async function doScrapeAllImages() {
   const targets = chapters.value.filter(ch => ch.source_url)
-  if (targets.length === 0) {
-    alert('No chapters have a source URL to scrape from.')
-    return
-  }
-  if (!confirm(`Scrape images for all ${targets.length} chapters? This may take a while.`)) return
-
+  if (targets.length === 0) { alert('No chapters have a source URL.'); return }
+  if (!confirm(`Scrape images for all ${targets.length} chapters on this page?`)) return
   bulkScraping.value = true
   bulkProgress.value = 0
   bulkTotal.value = targets.length
-
   for (const ch of targets) {
     try {
       const res = await api.post('/admin/import/chapter-images', { chapter_id: ch.id, chapter_url: ch.source_url })
       ch.image_count = res.data.images_count
-    } catch {
-      // skip failed chapters silently
-    }
+    } catch {}
     bulkProgress.value++
   }
-
   bulkScraping.value = false
   alert(`Done! Scraped images for ${targets.length} chapters.`)
+}
+
+async function doDedup() {
+  if (!selectedSeries.value) return
+  if (!confirm(`Remove duplicate chapters from "${selectedSeries.value.title}"?`)) return
+  deduping.value = true
+  try {
+    await api.delete('/admin/chapters/duplicates', { params: { series_id: selectedSeries.value.id } })
+    // Poll until background job finishes
+    await new Promise<void>(resolve => {
+      const poll = setInterval(async () => {
+        try {
+          const st = await api.get('/admin/chapters/duplicates/status')
+          if (!st.data.running) {
+            clearInterval(poll)
+            const deleted = st.data.last_deleted ?? 0
+            alert(`Removed ${deleted} duplicate chapter${deleted !== 1 ? 's' : ''}.`)
+            if (deleted > 0 && selectedSeries.value)
+              await fetchChaptersPage(selectedSeries.value.id, chapterPage.value)
+            resolve()
+          }
+        } catch { clearInterval(poll); resolve() }
+      }, 3000)
+    })
+  } catch (e: any) {
+    alert('Failed: ' + (e.response?.data?.error || e.message))
+  } finally {
+    deduping.value = false
+  }
 }
 
 function confirmDelete(ch: any) { deleteTarget.value = ch }

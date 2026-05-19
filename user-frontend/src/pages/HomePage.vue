@@ -266,22 +266,15 @@ function timeAgo(date: string): string {
 async function loadLatest() {
   latestLoading.value = true
   try {
-    const params: Record<string, unknown> = { sort: 'updated_at', limit: LATEST_PAGE_SIZE, page: latestPage.value, lang: route.meta.lang }
-    if (activeStatus.value) params.status = activeStatus.value
-    const res = await seriesApi.list(params)
+    const res = await seriesApi.latest(LATEST_PAGE_SIZE, route.meta.lang as string, latestPage.value)
     latestTotal.value = res.data.total
-    // Fetch last 3 chapters for each series in parallel
-    const groups = await Promise.all(
-      res.data.data.map(async s => {
-        try {
-          const r = await seriesApi.latestChapters(s.id)
-          return { series: s, chapters: r.data.data }
-        } catch {
-          return { series: s, chapters: [] }
-        }
-      })
-    )
-    latestGroups.value = groups
+    const groupMap = new Map<string, LatestGroup>()
+    for (const ch of res.data.data) {
+      if (!ch.series_id || !ch.series) continue
+      if (!groupMap.has(ch.series_id)) groupMap.set(ch.series_id, { series: ch.series, chapters: [] })
+      groupMap.get(ch.series_id)!.chapters.push(ch)
+    }
+    latestGroups.value = Array.from(groupMap.values())
   } catch {
     latestGroups.value = []
     latestTotal.value = 0

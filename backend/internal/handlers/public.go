@@ -107,6 +107,7 @@ func GetChapter(c *gin.Context) {
 }
 
 // GetLatestUpdates GET /api/latest
+// Orders by series updated_at so bulk chapter imports don't flood the feed.
 func GetLatestUpdates(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "12"))
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -118,55 +119,31 @@ func GetLatestUpdates(c *gin.Context) {
 	}
 	lang := c.Query("lang")
 
-	// Fetch enough chapters to cover several pages of unique series
-	chapters, err := repository.LatestChapters(c.Request.Context(), 100, lang)
+	// Fetch series ordered by updated_at — one series per slot regardless of how
+	// many chapters were imported in one batch.
+	seriesResult, err := repository.ListSeriesPage(c.Request.Context(), repository.ListSeriesParams{
+		SortBy:   "updated_at",
+		Limit:    limit,
+		Language: lang,
+	}, page)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Group chapters by series — no DB calls yet, just organize
-	const maxPerSeries = 3
-	seriesOrder := []string{}
-	seriesChapters := map[string][]*models.Chapter{}
-	for _, ch := range chapters {
-		if ch.SeriesID == "" {
-			continue
-		}
-		if _, seen := seriesChapters[ch.SeriesID]; !seen {
-			seriesOrder = append(seriesOrder, ch.SeriesID)
-			seriesChapters[ch.SeriesID] = nil
-		}
-		if len(seriesChapters[ch.SeriesID]) < maxPerSeries {
-			seriesChapters[ch.SeriesID] = append(seriesChapters[ch.SeriesID], ch)
-		}
-	}
-
-	total := len(seriesOrder)
-	offset := (page - 1) * limit
-	if offset >= total {
-		c.JSON(http.StatusOK, gin.H{"data": []*models.Chapter{}, "total": total, "page": page})
-		return
-	}
-	end := offset + limit
-	if end > total {
-		end = total
-	}
-
-	// Batch-fetch all series on this page in a single BatchGetItem call.
-	pageIDs := seriesOrder[offset:end]
-	seriesMap, _ := repository.BatchGetSeriesByIDs(c.Request.Context(), pageIDs)
-
+	// For each series get its 3 most recent chapters (uses a targeted GSI query,
+	// Limit:3 — very cheap, no full scan).
 	var result []*models.Chapter
-	for _, sid := range pageIDs {
-		s := seriesMap[sid]
-		for _, ch := range seriesChapters[sid] {
+	for i := range seriesResult.Items {
+		s := seriesResult.Items[i]
+		chs, _ := repository.LatestChaptersBySeries(c.Request.Context(), s.ID, 3)
+		for _, ch := range chs {
 			ch.Series = s
 			result = append(result, ch)
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": result, "total": total, "page": page})
+	c.JSON(http.StatusOK, gin.H{"data": result, "total": seriesResult.Total, "page": page})
 }
 
 // refererMap maps image CDN hostnames to the Referer header they require.

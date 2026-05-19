@@ -68,13 +68,24 @@
 
         <!-- Chapter selection -->
         <div class="admin-card">
-          <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center justify-between mb-3">
             <h3 class="text-white font-semibold">Select Chapters to Import</h3>
             <div class="flex items-center gap-3">
               <button @click="h20SelectAll" class="text-xs text-indigo-400 hover:text-indigo-300">All</button>
               <button @click="h20SelectNone" class="text-xs text-gray-500 hover:text-gray-300">None</button>
               <span class="text-xs text-gray-600">{{ h20.selectedSlugs.size }} / {{ h20.preview.chapters.length }} selected</span>
             </div>
+          </div>
+          <div class="flex items-center gap-2 mb-3">
+            <span class="text-xs text-gray-500">From</span>
+            <input type="number" min="1" v-model.number="h20.rangeFrom" @change="h20SelectRange"
+              class="form-input w-20 text-sm py-1" placeholder="1"/>
+            <span class="text-xs text-gray-500">To</span>
+            <input type="number" min="1" v-model.number="h20.rangeTo" @change="h20SelectRange"
+              class="form-input w-20 text-sm py-1" placeholder="100"/>
+            <button @click="h20SelectRange" class="text-xs px-3 py-1 bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 rounded-lg transition-colors">
+              Apply
+            </button>
           </div>
           <div class="max-h-72 overflow-y-auto rounded-lg border border-white/10 divide-y divide-white/5">
             <label v-for="ch in h20.preview.chapters" :key="ch.slug"
@@ -87,7 +98,13 @@
               <span class="text-xs text-gray-600 flex-shrink-0">Ch.{{ ch.number }}</span>
             </label>
           </div>
-          <div class="mt-4 flex gap-3">
+          <div class="mt-3 flex items-center gap-2">
+            <input id="h20-force" type="checkbox" v-model="h20.force" class="rounded accent-orange-500"/>
+            <label for="h20-force" class="text-xs text-orange-400 cursor-pointer select-none">
+              Force re-import (overwrite already-imported chapters)
+            </label>
+          </div>
+          <div class="mt-3 flex gap-3">
             <button @click="h20Reset" class="px-4 py-2 border border-white/10 text-gray-400 rounded-lg hover:bg-white/5 text-sm">
               ← New URL
             </button>
@@ -122,7 +139,10 @@
             <div>
               <p class="text-green-400 font-bold">Import Successful!</p>
               <p class="text-gray-300 text-sm mt-1"><strong class="text-white">{{ h20.result.series?.title }}</strong></p>
-              <p class="text-gray-500 text-xs mt-0.5">{{ h20.result.chapters_saved }} chapters saved, {{ h20.result.chapters_skipped }} skipped</p>
+              <p class="text-gray-500 text-xs mt-0.5">{{ h20.result.chapters_saved }} saved, {{ h20.result.chapters_skipped }} skipped</p>
+              <p v-if="h20.result.chapters_failed?.length > 0" class="text-red-400 text-xs mt-1">
+                Failed: {{ h20.result.chapters_failed.map((n: number) => `Ch.${n}`).join(', ') }}
+              </p>
               <div class="flex gap-2 mt-3">
                 <RouterLink to="/series" class="btn-primary text-xs py-1.5">View in Series</RouterLink>
                 <button @click="h20Reset" class="px-3 py-1.5 border border-white/10 text-gray-400 rounded-lg hover:bg-white/5 text-xs">Import Another</button>
@@ -193,13 +213,24 @@
 
         <!-- Chapter selection -->
         <div class="admin-card">
-          <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center justify-between mb-3">
             <h3 class="text-white font-semibold">Select Chapters to Import</h3>
             <div class="flex items-center gap-3">
               <button @click="mbSelectAll" class="text-xs text-indigo-400 hover:text-indigo-300">All</button>
               <button @click="mbSelectNone" class="text-xs text-gray-500 hover:text-gray-300">None</button>
               <span class="text-xs text-gray-600">{{ mb.selectedSlugs.size }} / {{ mb.preview.chapters.length }} selected</span>
             </div>
+          </div>
+          <div class="flex items-center gap-2 mb-3">
+            <span class="text-xs text-gray-500">From</span>
+            <input type="number" min="1" v-model.number="mb.rangeFrom" @change="mbSelectRange"
+              class="form-input w-20 text-sm py-1" placeholder="1"/>
+            <span class="text-xs text-gray-500">To</span>
+            <input type="number" min="1" v-model.number="mb.rangeTo" @change="mbSelectRange"
+              class="form-input w-20 text-sm py-1" placeholder="100"/>
+            <button @click="mbSelectRange" class="text-xs px-3 py-1 bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 rounded-lg transition-colors">
+              Apply
+            </button>
           </div>
           <div class="max-h-72 overflow-y-auto rounded-lg border border-white/10 divide-y divide-white/5">
             <label v-for="ch in mb.preview.chapters" :key="ch.slug"
@@ -212,7 +243,13 @@
               <span class="text-xs text-gray-600 flex-shrink-0">Ch.{{ ch.number }}</span>
             </label>
           </div>
-          <div class="mt-4 flex gap-3">
+          <div class="mt-3 flex items-center gap-2">
+            <input id="mb-force" type="checkbox" v-model="mb.force" class="rounded accent-orange-500"/>
+            <label for="mb-force" class="text-xs text-orange-400 cursor-pointer select-none">
+              Force re-import (overwrite already-imported chapters)
+            </label>
+          </div>
+          <div class="mt-3 flex gap-3">
             <button @click="mbReset" class="px-4 py-2 border border-white/10 text-gray-400 rounded-lg hover:bg-white/5 text-sm">
               ← New URL
             </button>
@@ -247,7 +284,10 @@
             <div>
               <p class="text-green-400 font-bold">Import Successful!</p>
               <p class="text-gray-300 text-sm mt-1"><strong class="text-white">{{ mb.result.series?.title }}</strong></p>
-              <p class="text-gray-500 text-xs mt-0.5">{{ mb.result.chapters_saved }} chapters saved, {{ mb.result.chapters_skipped }} skipped</p>
+              <p class="text-gray-500 text-xs mt-0.5">{{ mb.result.chapters_saved }} saved, {{ mb.result.chapters_skipped }} skipped</p>
+              <p v-if="mb.result.chapters_failed?.length > 0" class="text-red-400 text-xs mt-1">
+                Failed: {{ mb.result.chapters_failed.map((n: number) => `Ch.${n}`).join(', ') }}
+              </p>
               <div class="flex gap-2 mt-3">
                 <RouterLink to="/series" class="btn-primary text-xs py-1.5">View in Series</RouterLink>
                 <button @click="mbReset" class="px-3 py-1.5 border border-white/10 text-gray-400 rounded-lg hover:bg-white/5 text-xs">Import Another</button>
@@ -307,6 +347,9 @@ interface ImportState {
   importError: string
   result: any
   logs: LogEntry[]
+  force: boolean
+  rangeFrom: number | null
+  rangeTo: number | null
 }
 
 function makeState(): ImportState {
@@ -320,6 +363,9 @@ function makeState(): ImportState {
     importError: '',
     result: null,
     logs: [],
+    force: true,
+    rangeFrom: null,
+    rangeTo: null,
   }
 }
 
@@ -359,6 +405,15 @@ function h20SelectAll() {
 
 function h20SelectNone() { h20.selectedSlugs = new Set() }
 
+function h20SelectRange() {
+  if (!h20.preview) return
+  const from = h20.rangeFrom ?? 1
+  const to = h20.rangeTo ?? Infinity
+  h20.selectedSlugs = new Set(
+    h20.preview.chapters.filter(c => c.number >= from && c.number <= to).map(c => c.slug)
+  )
+}
+
 async function h20Import() {
   if (!h20.preview || h20.selectedSlugs.size === 0) return
   h20.importing = true
@@ -370,13 +425,33 @@ async function h20Import() {
   try {
     const res = await api.post('/admin/import', {
       url: h20.url.trim(),
-      selected_slugs: Array.from(h20.selectedSlugs),
-      scrape_images: true,
-      proxy_to_r2: true,
+      selected_chapters: h20.preview!.chapters.filter(c => h20.selectedSlugs.has(c.slug)),
+      force: h20.force,
     })
-    h20.result = res.data
-    h20.logs.push({ msg: `✓ Series saved: ${res.data.series?.title}`, type: 'success' })
-    h20.logs.push({ msg: `✓ ${res.data.chapters_saved} chapters saved, ${res.data.chapters_skipped} skipped`, type: 'success' })
+    if (res.status === 202) {
+      const { job_id, series, total } = res.data
+      h20.logs.push({ msg: `✓ Series ready: ${series?.title} — running ${total} chapters in background...`, type: 'info' })
+      await new Promise<void>(resolve => {
+        const poll = setInterval(async () => {
+          try {
+            const st = await api.get(`/admin/import/status?job_id=${job_id}`)
+            const d = st.data
+            const progressMsg = `⏳ ${d.done}/${d.total} (${d.saved} saved, ${d.skipped} skipped${d.failed?.length > 0 ? `, ${d.failed.length} failed` : ''})`
+            const last = h20.logs[h20.logs.length - 1]
+            if (last?.msg.startsWith('⏳')) h20.logs[h20.logs.length - 1] = { msg: progressMsg, type: 'info' }
+            else h20.logs.push({ msg: progressMsg, type: 'info' })
+            if (!d.running) {
+              clearInterval(poll)
+              const failed: number[] = d.failed ?? []
+              h20.result = { series, chapters_saved: d.saved, chapters_skipped: d.skipped, chapters_failed: failed }
+              h20.logs.push({ msg: `✓ Done! ${d.saved} saved, ${d.skipped} skipped${failed.length > 0 ? `, ${failed.length} failed` : ''}`, type: failed.length > 0 ? 'error' : 'success' })
+              if (failed.length > 0) h20.logs.push({ msg: `✗ Failed: ${failed.map((n: number) => `Ch.${n}`).join(', ')}`, type: 'error' })
+              resolve()
+            }
+          } catch { clearInterval(poll); resolve() }
+        }, 3000)
+      })
+    }
   } catch (e: any) {
     const errMsg = e.response?.data?.error || e.message || 'Unknown error'
     h20.importError = errMsg
@@ -422,6 +497,15 @@ function mbSelectAll() {
 
 function mbSelectNone() { mb.selectedSlugs = new Set() }
 
+function mbSelectRange() {
+  if (!mb.preview) return
+  const from = mb.rangeFrom ?? 1
+  const to = mb.rangeTo ?? Infinity
+  mb.selectedSlugs = new Set(
+    mb.preview.chapters.filter(c => c.number >= from && c.number <= to).map(c => c.slug)
+  )
+}
+
 async function mbImport() {
   if (!mb.preview || mb.selectedSlugs.size === 0) return
   mb.importing = true
@@ -433,11 +517,33 @@ async function mbImport() {
   try {
     const res = await api.post('/admin/import/mangaboost', {
       url: mb.url.trim(),
-      selected_slugs: Array.from(mb.selectedSlugs),
+      selected_chapters: mb.preview!.chapters.filter(c => mb.selectedSlugs.has(c.slug)),
+      force: mb.force,
     })
-    mb.result = res.data
-    mb.logs.push({ msg: `✓ Series saved: ${res.data.series?.title}`, type: 'success' })
-    mb.logs.push({ msg: `✓ ${res.data.chapters_saved} chapters saved, ${res.data.chapters_skipped} skipped`, type: 'success' })
+    if (res.status === 202) {
+      const { job_id, series, total } = res.data
+      mb.logs.push({ msg: `✓ Series ready: ${series?.title} — running ${total} chapters in background...`, type: 'info' })
+      await new Promise<void>(resolve => {
+        const poll = setInterval(async () => {
+          try {
+            const st = await api.get(`/admin/import/status?job_id=${job_id}`)
+            const d = st.data
+            const progressMsg = `⏳ ${d.done}/${d.total} (${d.saved} saved, ${d.skipped} skipped${d.failed?.length > 0 ? `, ${d.failed.length} failed` : ''})`
+            const last = mb.logs[mb.logs.length - 1]
+            if (last?.msg.startsWith('⏳')) mb.logs[mb.logs.length - 1] = { msg: progressMsg, type: 'info' }
+            else mb.logs.push({ msg: progressMsg, type: 'info' })
+            if (!d.running) {
+              clearInterval(poll)
+              const failed: number[] = d.failed ?? []
+              mb.result = { series, chapters_saved: d.saved, chapters_skipped: d.skipped, chapters_failed: failed }
+              mb.logs.push({ msg: `✓ Done! ${d.saved} saved, ${d.skipped} skipped${failed.length > 0 ? `, ${failed.length} failed` : ''}`, type: failed.length > 0 ? 'error' : 'success' })
+              if (failed.length > 0) mb.logs.push({ msg: `✗ Failed: ${failed.map((n: number) => `Ch.${n}`).join(', ')}`, type: 'error' })
+              resolve()
+            }
+          } catch { clearInterval(poll); resolve() }
+        }, 3000)
+      })
+    }
   } catch (e: any) {
     const errMsg = e.response?.data?.error || e.message || 'Unknown error'
     mb.importError = errMsg
