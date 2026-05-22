@@ -6,6 +6,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"mhentai-backend/internal/cron"
 	"mhentai-backend/internal/database"
 	"mhentai-backend/internal/router"
 	"mhentai-backend/internal/storage"
@@ -22,6 +23,7 @@ func main() {
 
 	database.Init()
 	storage.InitR2()
+	cron.StartAutoImport()
 
 	r := router.New(adminToken)
 	log.Printf("Server starting on port %s (admin token: %s)", port, adminToken)
