@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"math/rand"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -26,6 +29,8 @@ func ListSeries(c *gin.Context) {
 		SortBy:   c.DefaultQuery("sort", "updated_at"),
 		Search:   c.Query("q"),
 		Language: c.Query("lang"),
+		Genre:    c.Query("genre"),
+		Letter:   c.Query("letter"),
 		Limit:    limit,
 	}, page)
 	if err != nil {
@@ -119,31 +124,109 @@ func GetLatestUpdates(c *gin.Context) {
 	}
 	lang := c.Query("lang")
 
-	// Fetch series ordered by updated_at — one series per slot regardless of how
-	// many chapters were imported in one batch.
 	seriesResult, err := repository.ListSeriesPage(c.Request.Context(), repository.ListSeriesParams{
 		SortBy:   "updated_at",
 		Limit:    limit,
 		Language: lang,
+		Status:   c.Query("status"),
 	}, page)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// For each series get its 3 most recent chapters (uses a targeted GSI query,
-	// Limit:3 — very cheap, no full scan).
-	var result []*models.Chapter
+	// Fetch latest chapters for all series concurrently instead of sequentially.
+	ctx := c.Request.Context()
+	slots := make([][]*models.Chapter, len(seriesResult.Items))
+	var wg sync.WaitGroup
 	for i := range seriesResult.Items {
-		s := seriesResult.Items[i]
-		chs, _ := repository.LatestChaptersBySeries(c.Request.Context(), s.ID, 3)
-		for _, ch := range chs {
-			ch.Series = s
-			result = append(result, ch)
-		}
+		wg.Add(1)
+		go func(idx int, s *models.Series) {
+			defer wg.Done()
+			chs, _ := repository.LatestChaptersBySeries(ctx, s.ID, 3)
+			for _, ch := range chs {
+				ch.Series = s
+			}
+			slots[idx] = chs
+		}(i, seriesResult.Items[i])
+	}
+	wg.Wait()
+
+	result := make([]*models.Chapter, 0, len(seriesResult.Items)*3)
+	for _, chs := range slots {
+		result = append(result, chs...)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": result, "total": seriesResult.Total, "page": page})
+}
+
+// GetGenres GET /api/genres
+// Returns sorted list of distinct genres from the cached series data.
+func GetGenres(c *gin.Context) {
+	all, err := repository.GetAllSeries(c.Request.Context(), c.Query("lang"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	seen := map[string]struct{}{}
+	var genres []string
+	for _, s := range all {
+		for _, g := range strings.Split(s.Genres, ",") {
+			t := strings.TrimSpace(g)
+			if t != "" {
+				if _, ok := seen[t]; !ok {
+					seen[t] = struct{}{}
+					genres = append(genres, t)
+				}
+			}
+		}
+	}
+	sort.Strings(genres)
+	c.JSON(http.StatusOK, gin.H{"data": genres})
+}
+
+// GetRecommendations GET /api/recommendations
+// Returns a random sample of series matching the requested genre, from cache.
+func GetRecommendations(c *gin.Context) {
+	genre := c.Query("genre")
+	status := c.Query("status")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "5"))
+	if limit < 1 || limit > 20 {
+		limit = 5
+	}
+
+	all, err := repository.GetAllSeries(c.Request.Context(), c.Query("lang"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var filtered []*models.Series
+	for _, s := range all {
+		if status != "" && s.Status != status {
+			continue
+		}
+		if genre == "" || containsGenre(s.Genres, genre) {
+			filtered = append(filtered, s)
+		}
+	}
+
+	cp := make([]*models.Series, len(filtered))
+	copy(cp, filtered)
+	rand.Shuffle(len(cp), func(i, j int) { cp[i], cp[j] = cp[j], cp[i] })
+	if len(cp) > limit {
+		cp = cp[:limit]
+	}
+	c.JSON(http.StatusOK, gin.H{"data": cp})
+}
+
+func containsGenre(genres, target string) bool {
+	for _, g := range strings.Split(genres, ",") {
+		if strings.TrimSpace(g) == target {
+			return true
+		}
+	}
+	return false
 }
 
 // refererMap maps image CDN hostnames to the Referer header they require.

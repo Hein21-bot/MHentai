@@ -285,12 +285,13 @@ function onImgError(e: Event, idx: number) {
   imgLoaded.value[idx] = true
 }
 
-async function loadRelated(currentSeriesId?: string) {
+async function loadRelated(currentSeriesId?: string, genres?: string) {
   try {
-    const res = await seriesApi.list({ sort: 'views', limit: 7, lang: route.meta.lang })
-    relatedSeries.value = res.data.data
-      .filter(s => s.id !== currentSeriesId)
-      .slice(0, 6)
+    const primaryGenre = genres?.split(',')[0]?.trim() || ''
+    const params: Record<string, unknown> = { sort: 'views', limit: 7, lang: route.meta.lang }
+    if (primaryGenre) params.genre = primaryGenre
+    const res = await seriesApi.list(params)
+    relatedSeries.value = res.data.data.filter(s => s.id !== currentSeriesId).slice(0, 6)
   } catch {
     relatedSeries.value = []
   }
@@ -323,7 +324,7 @@ async function load() {
         readAt: Date.now(),
       })
     }
-    loadRelated(data.value?.chapter?.series_id)
+    loadRelated(data.value?.chapter?.series_id, data.value?.chapter?.series?.genres)
     if (data.value?.chapter?.series?.slug) {
       seriesApi.get(data.value.chapter.series.slug).then(r => {
         seriesChapters.value = r.data.chapters ?? []

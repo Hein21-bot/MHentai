@@ -17,21 +17,12 @@
         </select>
       </div>
       <!-- Dropdowns row 2 -->
-      <div class="grid grid-cols-2 gap-2">
-        <select v-model="filterSort" class="filter-select">
-          <option value="">Order by Default</option>
-          <option value="views">Most Views</option>
-          <option value="updated_at">Latest Update</option>
-          <option value="title">A — Z</option>
-        </select>
-        <!-- placeholder for future type filter -->
-        <select v-model="filterType" class="filter-select">
-          <option value="">Type All</option>
-          <option value="manhwa">Manhwa</option>
-          <option value="manga">Manga</option>
-          <option value="manhua">Manhua</option>
-        </select>
-      </div>
+      <select v-model="filterSort" class="filter-select">
+        <option value="">Order by Default</option>
+        <option value="views">Most Views</option>
+        <option value="updated_at">Latest Update</option>
+        <option value="title">A — Z</option>
+      </select>
 
       <!-- Search button -->
       <button @click="doSearch"
@@ -62,7 +53,7 @@
 
     <!-- Results count -->
     <p v-if="!loading" class="text-sm text-gray-500 dark:text-gray-500">
-      <span class="font-semibold text-gray-900 dark:text-white">{{ results.length }}</span> series found
+      <span class="font-semibold text-gray-900 dark:text-white">{{ total }}</span> series found
       <span v-if="totalPages > 1"> · Page {{ currentPage }} of {{ totalPages }}</span>
     </p>
 
@@ -80,7 +71,7 @@
     <template v-else>
       <!-- Grid -->
       <div class="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3 md:grid-cols-5">
-        <RouterLink v-for="s in paginated" :key="s.id"
+        <RouterLink v-for="s in results" :key="s.id"
           :to="`/${route.meta.lang}/series/${s.slug}`"
           class="group block">
           <div class="relative aspect-[2/3] rounded-xl overflow-hidden bg-gray-200 dark:bg-dark-card">
@@ -120,7 +111,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { seriesApi } from '@/services/api'
+import { seriesApi, genresApi } from '@/services/api'
 import { imgError } from '@/utils/ratings'
 import type { Series } from '@/services/api'
 
@@ -129,86 +120,79 @@ const route = useRoute()
 const filterGenre = ref('')
 const filterStatus = ref('')
 const filterSort = ref('')
-const filterType = ref('')
 const filterText = ref('')
 const textMode = ref(false)
 const results = ref<Series[]>([])
+const total = ref(0)
 const genreOptions = ref<string[]>([])
 const loading = ref(false)
 const currentPage = ref(1)
 const PAGE_SIZE = 24
+let loadSeq = 0
 
-const totalPages = computed(() => Math.ceil(results.value.length / PAGE_SIZE))
-const paginated = computed(() => {
-  const start = (currentPage.value - 1) * PAGE_SIZE
-  return results.value.slice(start, start + PAGE_SIZE)
-})
+const totalPages = computed(() => Math.ceil(total.value / PAGE_SIZE))
 const pageNumbers = computed(() => {
-  const total = totalPages.value
+  const t = totalPages.value
   const cur = currentPage.value
   const pages: (number | '…')[] = []
-  if (total <= 7) {
-    for (let i = 1; i <= total; i++) pages.push(i)
+  if (t <= 7) {
+    for (let i = 1; i <= t; i++) pages.push(i)
   } else {
     pages.push(1)
     if (cur > 3) pages.push('…')
-    for (let i = Math.max(2, cur - 1); i <= Math.min(total - 1, cur + 1); i++) pages.push(i)
-    if (cur < total - 2) pages.push('…')
-    pages.push(total)
+    for (let i = Math.max(2, cur - 1); i <= Math.min(t - 1, cur + 1); i++) pages.push(i)
+    if (cur < t - 2) pages.push('…')
+    pages.push(t)
   }
   return pages
 })
 
-function goPage(p: number) {
-  currentPage.value = Math.max(1, Math.min(p, totalPages.value))
-  window.scrollTo({ top: 0, behavior: 'smooth' })
-}
-
-
-
-async function doSearch() {
+async function loadPage() {
+  const id = ++loadSeq
   loading.value = true
-  currentPage.value = 1
   try {
     const params: Record<string, unknown> = {
-      limit: 200,
+      limit: PAGE_SIZE,
+      page: currentPage.value,
       lang: route.meta.lang,
     }
     if (filterStatus.value) params.status = filterStatus.value
-    if (filterSort.value) params.sort = filterSort.value
+    if (filterSort.value)   params.sort   = filterSort.value
     if (filterText.value.trim()) params.q = filterText.value.trim()
-
+    if (filterGenre.value)  params.genre  = filterGenre.value
     const res = await seriesApi.list(params)
-    let data = res.data.data
-
-    // client-side genre filter
-    if (filterGenre.value) {
-      data = data.filter(s =>
-        s.genres?.split(',').map(g => g.trim()).includes(filterGenre.value)
-      )
-    }
-    results.value = data
+    if (id !== loadSeq) return
+    results.value = res.data.data
+    total.value = res.data.total
   } catch {
+    if (id !== loadSeq) return
     results.value = []
+    total.value = 0
   } finally {
-    loading.value = false
+    if (id === loadSeq) loading.value = false
   }
+}
+
+function doSearch() {
+  currentPage.value = 1
+  loadPage()
+}
+
+function goPage(p: number) {
+  currentPage.value = Math.max(1, Math.min(p, totalPages.value))
+  loadPage()
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 async function loadGenres() {
   try {
-    const res = await seriesApi.list({ sort: 'title', limit: 500, lang: route.meta.lang })
-    const set = new Set<string>()
-    for (const s of res.data.data) {
-      if (s.genres) s.genres.split(',').forEach(g => { const t = g.trim(); if (t) set.add(t) })
-    }
-    genreOptions.value = Array.from(set).sort()
+    const res = await genresApi.list(route.meta.lang as string)
+    genreOptions.value = res.data.data
   } catch {}
 }
 
 async function loadAll() {
-  await loadGenres()
-  await doSearch()
+  await Promise.all([loadGenres(), loadPage()])
 }
 
 watch(() => route.meta.lang, () => {
@@ -218,6 +202,7 @@ watch(() => route.meta.lang, () => {
   filterText.value = ''
   loadAll()
 })
+
 
 onMounted(loadAll)
 </script>

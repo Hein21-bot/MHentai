@@ -23,14 +23,19 @@
       Select a genre to browse series
     </div>
 
+    <!-- Loading results -->
+    <div v-else-if="resultsLoading" class="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3 md:grid-cols-5">
+      <div v-for="i in 15" :key="i" class="aspect-[2/3] bg-gray-200 rounded-xl animate-pulse dark:bg-dark-card"/>
+    </div>
+
     <!-- Results -->
     <template v-else>
       <p class="text-sm text-gray-500 dark:text-gray-500">
-        <span class="font-semibold text-gray-900 dark:text-white">{{ filtered.length }}</span> series in
+        <span class="font-semibold text-gray-900 dark:text-white">{{ genreResults.length }}</span> series in
         <span class="text-primary font-semibold">{{ activeGenre }}</span>
       </p>
       <div class="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3 md:grid-cols-5">
-        <RouterLink v-for="s in filtered" :key="s.id"
+        <RouterLink v-for="s in genreResults" :key="s.id"
           :to="`/${route.meta.lang}/series/${s.slug}`" class="group block">
           <div class="relative aspect-[2/3] rounded-xl overflow-hidden bg-gray-200 dark:bg-dark-card">
             <img v-if="s.cover_url" :src="s.cover_url" :alt="s.title"
@@ -53,47 +58,51 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { seriesApi } from '@/services/api'
+import { seriesApi, genresApi } from '@/services/api'
 import { imgError } from '@/utils/ratings'
 import type { Series } from '@/services/api'
 
 const route = useRoute()
-const allSeries = ref<Series[]>([])
+const allGenres = ref<string[]>([])
+const genreResults = ref<Series[]>([])
 const loading = ref(true)
+const resultsLoading = ref(false)
 const activeGenre = ref('')
+let loadSeq = 0
 
-const allGenres = computed(() => {
-  const set = new Set<string>()
-  for (const s of allSeries.value) {
-    if (s.genres) s.genres.split(',').forEach(g => { const t = g.trim(); if (t) set.add(t) })
-  }
-  return Array.from(set).sort()
-})
-
-const filtered = computed(() => {
-  if (!activeGenre.value) return []
-  return allSeries.value.filter(s =>
-    s.genres?.split(',').map(g => g.trim()).includes(activeGenre.value)
-  )
-})
-
-
-
-async function load() {
+async function loadGenres() {
   loading.value = true
   activeGenre.value = ''
+  genreResults.value = []
   try {
-    const res = await seriesApi.list({ sort: 'title', limit: 500, lang: route.meta.lang })
-    allSeries.value = res.data.data
+    const res = await genresApi.list(route.meta.lang as string)
+    allGenres.value = res.data.data
   } catch {
-    allSeries.value = []
+    allGenres.value = []
   } finally {
     loading.value = false
   }
 }
 
-watch(() => route.meta.lang, load)
-onMounted(load)
+async function loadByGenre(genre: string) {
+  if (!genre) { genreResults.value = []; return }
+  const id = ++loadSeq
+  resultsLoading.value = true
+  try {
+    const res = await seriesApi.list({ genre, lang: route.meta.lang, limit: 500, sort: 'title' })
+    if (id !== loadSeq) return
+    genreResults.value = res.data.data
+  } catch {
+    if (id !== loadSeq) return
+    genreResults.value = []
+  } finally {
+    if (id === loadSeq) resultsLoading.value = false
+  }
+}
+
+watch(activeGenre, loadByGenre)
+watch(() => route.meta.lang, loadGenres)
+onMounted(loadGenres)
 </script>

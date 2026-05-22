@@ -38,7 +38,13 @@ export const seriesApi = {
   list: (params?: Record<string, unknown>) => api.get<{ data: Series[]; total: number; page: number }>('/series', { params }),
   get: (slug: string) => api.get<Series>(`/series/${slug}`),
   latestChapters: (slug: string) => api.get<{ data: Chapter[] }>(`/series/${slug}/latest-chapters`),
-  latest: (limit = 12, lang?: string, page = 1) => api.get<{ data: Chapter[]; total: number; page: number }>('/latest', { params: { limit, lang, page } }),
+  latest: (limit = 12, lang?: string, page = 1, status?: string) => api.get<{ data: Chapter[]; total: number; page: number }>('/latest', { params: { limit, lang, page, status: status || undefined } }),
+}
+
+export const genresApi = {
+  list: (lang?: string) => api.get<{ data: string[] }>('/genres', { params: { lang } }),
+  recommendations: (genre: string, limit = 5, lang?: string, status?: string) =>
+    api.get<{ data: Series[] }>('/recommendations', { params: { genre, limit, lang, status: status || undefined } }),
 }
 
 export const chapterApi = {

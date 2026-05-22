@@ -349,12 +349,10 @@ func AdminDeduplicateChapters(c *gin.Context) {
 			}
 		}
 
-		if deleted > 0 {
-			remaining, _ := repository.ListAllChapters(ctx, seriesID)
-			_ = repository.UpdateSeriesFields(ctx, seriesID, map[string]interface{}{
-				"chapter_count": len(remaining),
-			})
-		}
+		remaining, _ := repository.ListAllChapters(ctx, seriesID)
+		_ = repository.UpdateSeriesFields(ctx, seriesID, map[string]interface{}{
+			"chapter_count": len(remaining),
+		})
 		dedupLastDeleted = deleted
 	}()
 

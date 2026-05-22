@@ -158,7 +158,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { seriesApi } from '@/services/api'
+import { seriesApi, genresApi } from '@/services/api'
 import AdNative from '@/components/ads/AdNative.vue'
 import AdBanner300 from '@/components/ads/AdBanner300.vue'
 import { imgError, starText } from '@/utils/ratings'
@@ -172,7 +172,6 @@ const latestTotal = ref(0)
 const latestPage = ref(1)
 const LATEST_PAGE_SIZE = 12
 const popularSeries = ref<Series[]>([])
-const recommendations = ref<Series[]>([])
 const latestLoading = ref(false)
 const popularLoading = ref(false)
 const recoLoading = ref(false)
@@ -217,14 +216,17 @@ function shuffle<T>(arr: T[]): T[] {
   return a
 }
 
-function pickRecos() {
-  const filtered = recommendations.value.filter(s =>
-    s.genres?.split(',').map(g => g.trim()).includes(activeGenre.value)
-  )
-  randomRecos.value = shuffle(filtered).slice(0, 5)
+async function loadRecosByGenre(genre: string) {
+  if (!genre) return
+  recoLoading.value = true
+  try {
+    const res = await genresApi.recommendations(genre, 5, route.meta.lang as string, activeStatus.value)
+    randomRecos.value = res.data.data
+  } catch { randomRecos.value = [] }
+  finally { recoLoading.value = false }
 }
 
-watch(activeGenre, pickRecos)
+watch(activeGenre, loadRecosByGenre)
 
 async function loadPopular() {
   popularLoading.value = true
@@ -237,23 +239,19 @@ async function loadPopular() {
   finally { popularLoading.value = false }
 }
 
-async function loadRecommendations() {
+async function loadGenres() {
   recoLoading.value = true
   try {
-    const params: Record<string, unknown> = { sort: 'title', limit: 500, lang: route.meta.lang }
-    if (activeStatus.value) params.status = activeStatus.value
-    const res = await seriesApi.list(params)
-    recommendations.value = res.data.data
-    // Build shuffled genre list
-    const seen = new Set<string>()
-    for (const s of recommendations.value) {
-      if (s.genres) s.genres.split(',').forEach(g => { const t = g.trim(); if (t) seen.add(t) })
-    }
-    recoGenres.value = shuffle(Array.from(seen)).slice(0, 6)
-    if (!activeGenre.value) activeGenre.value = recoGenres.value[0] ?? ''
-    pickRecos()
-  } catch { recommendations.value = [] }
-  finally { recoLoading.value = false }
+    const res = await genresApi.list(route.meta.lang as string)
+    recoGenres.value = shuffle(res.data.data).slice(0, 6)
+    const first = recoGenres.value[0] ?? ''
+    activeGenre.value = first
+    // watch(activeGenre) fires loadRecosByGenre when activeGenre changes to first
+    if (!first) recoLoading.value = false
+  } catch {
+    recoGenres.value = []
+    recoLoading.value = false
+  }
 }
 
 function timeAgo(date: string): string {
@@ -266,7 +264,7 @@ function timeAgo(date: string): string {
 async function loadLatest() {
   latestLoading.value = true
   try {
-    const res = await seriesApi.latest(LATEST_PAGE_SIZE, route.meta.lang as string, latestPage.value)
+    const res = await seriesApi.latest(LATEST_PAGE_SIZE, route.meta.lang as string, latestPage.value, activeStatus.value)
     latestTotal.value = res.data.total
     const groupMap = new Map<string, LatestGroup>()
     for (const ch of res.data.data) {
@@ -287,13 +285,13 @@ watch(() => [route.meta.lang, route.query.status, route.query.sort], () => {
   activeGenre.value = ''
   latestPage.value = 1
   loadPopular()
-  loadRecommendations()
+  loadGenres()
   loadLatest()
 })
 
 onMounted(() => {
   loadPopular()
-  loadRecommendations()
+  loadGenres()
   loadLatest()
 })
 </script>

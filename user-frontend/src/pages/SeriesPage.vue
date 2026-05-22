@@ -188,12 +188,13 @@ function loadHistory() {
   seriesHistory.value = series.value ? getReadHistoryForSeries(series.value.id, 3) : []
 }
 
-async function loadRelated(currentId?: string) {
+async function loadRelated(currentId?: string, genres?: string) {
   try {
-    const res = await seriesApi.list({ sort: 'views', limit: 7, lang: route.meta.lang })
-    relatedSeries.value = res.data.data
-      .filter(s => s.id !== currentId)
-      .slice(0, 6)
+    const primaryGenre = genres?.split(',')[0]?.trim() || ''
+    const params: Record<string, unknown> = { sort: 'views', limit: 7, lang: route.meta.lang }
+    if (primaryGenre) params.genre = primaryGenre
+    const res = await seriesApi.list(params)
+    relatedSeries.value = res.data.data.filter(s => s.id !== currentId).slice(0, 6)
   } catch {
     relatedSeries.value = []
   }
@@ -207,7 +208,8 @@ async function load() {
   try {
     const res = await seriesApi.get(route.params.slug as string)
     series.value = res.data
-    loadRelated(res.data.id)
+    document.title = `${res.data.title} | MHentai`
+    loadRelated(res.data.id, res.data.genres)
     loadHistory()
   } catch {
     error.value = true

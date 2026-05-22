@@ -21,7 +21,9 @@ var (
 )
 
 func listCacheKey(p ListSeriesParams) string {
-	return fmt.Sprintf("%s|%s|%s|%s", p.Status, p.SortBy, p.Search, p.Language)
+	// SortBy is intentionally excluded: the cache stores unsorted data and callers
+	// sort a copy, so all sort variants share the same underlying scan.
+	return fmt.Sprintf("%s|%s|%s", p.Status, p.Search, p.Language)
 }
 
 func cacheGetList(key string) ([]*models.Series, bool) {

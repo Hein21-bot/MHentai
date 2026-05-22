@@ -50,8 +50,11 @@ func GetChapterByID(ctx context.Context, id string) (*models.Chapter, error) {
 	return &ch, nil
 }
 
-// GetChapterBySlug fetches a chapter via the slug GSI (includes images for reading).
+// GetChapterBySlug fetches a chapter via the slug GSI then reads the full item
+// from the main table. The two-step approach guarantees images are always
+// included regardless of whether the GSI uses ALL or KEYS_ONLY projection.
 func GetChapterBySlug(ctx context.Context, slug string) (*models.Chapter, error) {
+	// Step 1: resolve slug → id via GSI (only need the id)
 	out, err := database.Client.Query(ctx, &dynamodb.QueryInput{
 		TableName:              aws.String(database.TableChapters),
 		IndexName:              aws.String("slug-index"),
@@ -59,7 +62,8 @@ func GetChapterBySlug(ctx context.Context, slug string) (*models.Chapter, error)
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":slug": &types.AttributeValueMemberS{Value: slug},
 		},
-		Limit: aws.Int32(1),
+		ProjectionExpression: aws.String("id"),
+		Limit:                aws.Int32(1),
 	})
 	if err != nil {
 		return nil, err
@@ -67,11 +71,14 @@ func GetChapterBySlug(ctx context.Context, slug string) (*models.Chapter, error)
 	if len(out.Items) == 0 {
 		return nil, ErrNotFound
 	}
-	var ch models.Chapter
-	if err = attributevalue.UnmarshalMap(out.Items[0], &ch); err != nil {
-		return nil, err
+	var key struct {
+		ID string `dynamodbav:"id"`
 	}
-	return &ch, nil
+	if err = attributevalue.UnmarshalMap(out.Items[0], &key); err != nil || key.ID == "" {
+		return nil, ErrNotFound
+	}
+	// Step 2: fetch full item from main table (always has all attributes incl. images)
+	return GetChapterByID(ctx, key.ID)
 }
 
 // ListChaptersBySeries returns all chapters for a series, sorted by number ASC.

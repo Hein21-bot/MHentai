@@ -34,6 +34,8 @@ func New(adminToken string) *gin.Engine {
 		api.GET("/series/:id/latest-chapters", handlers.GetSeriesLatestChapters)
 		api.GET("/chapters/:slug", handlers.GetChapter)
 		api.GET("/latest", handlers.GetLatestUpdates)
+		api.GET("/genres", handlers.GetGenres)
+		api.GET("/recommendations", handlers.GetRecommendations)
 		api.GET("/proxy/img", handlers.ProxyImage)
 	}
 

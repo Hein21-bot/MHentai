@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -136,6 +137,8 @@ type ListSeriesParams struct {
 	SortBy   string // "updated_at" | "created_at" | "title" | "views"
 	Search   string
 	Language string // "" = all, "en", "my"
+	Genre    string // "" = all; applied in-memory from cache, not in DynamoDB
+	Letter   string // "" = all; "A"-"Z", "0-9", "#" — applied in-memory from cache
 	Limit    int
 	LastKey  map[string]types.AttributeValue
 }
@@ -165,11 +168,54 @@ func ListSeriesPage(ctx context.Context, p ListSeriesParams, page int) (*ListSer
 		if err != nil {
 			return nil, err
 		}
-		sortSeries(allItems, p.SortBy)
 		cacheSetList(key, allItems)
 	}
 
-	total := len(allItems)
+	// Letter filter applied in-memory so it reuses the shared cache entry.
+	if p.Letter != "" {
+		var lf []*models.Series
+		for _, s := range allItems {
+			runes := []rune(s.Title)
+			if len(runes) == 0 {
+				continue
+			}
+			first := strings.ToUpper(string(runes[0]))
+			var match bool
+			switch p.Letter {
+			case "#":
+				match = (first < "A" || first > "Z") && (first < "0" || first > "9")
+			case "0-9":
+				match = first >= "0" && first <= "9"
+			default:
+				match = first == strings.ToUpper(p.Letter)
+			}
+			if match {
+				lf = append(lf, s)
+			}
+		}
+		allItems = lf
+	}
+
+	// Genre filter applied in-memory so it reuses the shared cache entry.
+	if p.Genre != "" {
+		var gf []*models.Series
+		for _, s := range allItems {
+			for _, g := range strings.Split(s.Genres, ",") {
+				if strings.TrimSpace(g) == p.Genre {
+					gf = append(gf, s)
+					break
+				}
+			}
+		}
+		allItems = gf
+	}
+
+	// Sort a copy so the cached slice (shared across sort orders) is never mutated.
+	sorted := make([]*models.Series, len(allItems))
+	copy(sorted, allItems)
+	sortSeries(sorted, p.SortBy)
+
+	total := len(sorted)
 	offset := (page - 1) * p.Limit
 	if offset >= total {
 		return &ListSeriesResult{Items: []*models.Series{}, Total: total}, nil
@@ -179,7 +225,23 @@ func ListSeriesPage(ctx context.Context, p ListSeriesParams, page int) (*ListSer
 		end = total
 	}
 
-	return &ListSeriesResult{Items: allItems[offset:end], Total: total}, nil
+	return &ListSeriesResult{Items: sorted[offset:end], Total: total}, nil
+}
+
+// GetAllSeries returns the full unsorted series list for a language from cache (or scans once).
+// Used by genre/recommendation endpoints that need all series without pagination.
+func GetAllSeries(ctx context.Context, lang string) ([]*models.Series, error) {
+	key := listCacheKey(ListSeriesParams{Language: lang})
+	items, cached := cacheGetList(key)
+	if !cached {
+		var err error
+		items, err = scanAllSeries(ctx, ListSeriesParams{Language: lang})
+		if err != nil {
+			return nil, err
+		}
+		cacheSetList(key, items)
+	}
+	return items, nil
 }
 
 // scanAllSeries does the full DynamoDB scan with the given filters.
