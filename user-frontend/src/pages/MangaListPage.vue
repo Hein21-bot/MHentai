@@ -110,23 +110,24 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { seriesApi, genresApi } from '@/services/api'
 import { imgError } from '@/utils/ratings'
 import type { Series } from '@/services/api'
 
 const route = useRoute()
+const router = useRouter()
 
-const filterGenre = ref('')
-const filterStatus = ref('')
-const filterSort = ref('')
-const filterText = ref('')
-const textMode = ref(false)
+const filterGenre = ref((route.query.genre as string) || '')
+const filterStatus = ref((route.query.status as string) || '')
+const filterSort = ref((route.query.sort as string) || '')
+const filterText = ref((route.query.q as string) || '')
+const textMode = ref(!!route.query.q)
 const results = ref<Series[]>([])
 const total = ref(0)
 const genreOptions = ref<string[]>([])
 const loading = ref(false)
-const currentPage = ref(1)
+const currentPage = ref(Number(route.query.page) || 1)
 const PAGE_SIZE = 24
 let loadSeq = 0
 
@@ -173,14 +174,24 @@ async function loadPage() {
   }
 }
 
+function buildQuery(page = currentPage.value) {
+  const q: Record<string, string> = {}
+  if (filterGenre.value)       q.genre  = filterGenre.value
+  if (filterStatus.value)      q.status = filterStatus.value
+  if (filterSort.value)        q.sort   = filterSort.value
+  if (filterText.value.trim()) q.q      = filterText.value.trim()
+  if (page > 1)                q.page   = String(page)
+  return q
+}
+
 function doSearch() {
   currentPage.value = 1
-  loadPage()
+  router.push({ query: buildQuery(1) })
 }
 
 function goPage(p: number) {
   currentPage.value = Math.max(1, Math.min(p, totalPages.value))
-  loadPage()
+  router.push({ query: buildQuery(currentPage.value) })
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
@@ -195,14 +206,18 @@ async function loadAll() {
   await Promise.all([loadGenres(), loadPage()])
 }
 
-watch(() => route.meta.lang, () => {
-  filterGenre.value = ''
-  filterStatus.value = ''
-  filterSort.value = ''
-  filterText.value = ''
-  loadAll()
-})
+watch(() => route.query, (q) => {
+  filterGenre.value  = (q.genre  as string) || ''
+  filterStatus.value = (q.status as string) || ''
+  filterSort.value   = (q.sort   as string) || ''
+  filterText.value   = (q.q      as string) || ''
+  currentPage.value  = Number(q.page) || 1
+  loadPage()
+}, { deep: true })
 
+watch(() => route.meta.lang, () => {
+  router.push({ query: {} })
+})
 
 onMounted(loadAll)
 </script>

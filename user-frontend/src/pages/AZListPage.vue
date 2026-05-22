@@ -76,7 +76,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { seriesApi } from '@/services/api'
 import { imgError } from '@/utils/ratings'
 import type { Series } from '@/services/api'
@@ -84,11 +84,12 @@ import type { Series } from '@/services/api'
 const PAGE_SIZE = 24
 
 const route = useRoute()
+const router = useRouter()
 const results = ref<Series[]>([])
 const total = ref(0)
 const loading = ref(false)
-const activeLetter = ref('')
-const currentPage = ref(1)
+const activeLetter = ref((route.query.letter as string) || '')
+const currentPage = ref(Number(route.query.page) || 1)
 let loadSeq = 0
 
 const letters = ['#', '0-9', 'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z']
@@ -138,16 +139,27 @@ async function load() {
 function setLetter(l: string) {
   activeLetter.value = l
   currentPage.value = 1
-  load()
+  router.push({ query: { ...(l ? { letter: l } : {}), page: 1 } })
 }
 
 function goPage(p: number) {
   currentPage.value = Math.max(1, Math.min(p, totalPages.value))
-  load()
+  router.push({ query: { ...(activeLetter.value ? { letter: activeLetter.value } : {}), page: currentPage.value } })
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-watch(() => route.meta.lang, () => { activeLetter.value = ''; currentPage.value = 1; load() })
+watch(() => route.query, (q) => {
+  activeLetter.value = (q.letter as string) || ''
+  currentPage.value = Number(q.page) || 1
+  load()
+}, { deep: true })
+
+watch(() => route.meta.lang, () => {
+  activeLetter.value = ''
+  currentPage.value = 1
+  router.push({ query: {} })
+})
+
 onMounted(load)
 </script>
 
