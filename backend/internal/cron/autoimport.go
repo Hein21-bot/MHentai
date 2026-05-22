@@ -47,6 +47,9 @@ func runAutoImport() int {
 		if s.SourceURL == "" || !strings.Contains(s.SourceURL, "manhwamyanmar.com") {
 			continue
 		}
+		if s.Status != "ongoing" {
+			continue
+		}
 		added, err := importNewChapters(ctx, s)
 		if err != nil {
 			log.Printf("[cron] Error on series %q: %v", s.Title, err)
