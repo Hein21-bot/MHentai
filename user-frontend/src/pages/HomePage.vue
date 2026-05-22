@@ -157,7 +157,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { seriesApi, genresApi } from '@/services/api'
 import AdNative from '@/components/ads/AdNative.vue'
 import AdBanner300 from '@/components/ads/AdBanner300.vue'
@@ -167,9 +167,10 @@ import type { Series, Chapter } from '@/services/api'
 interface LatestGroup { series: Series; chapters: Chapter[] }
 
 const route = useRoute()
+const router = useRouter()
 const latestGroups = ref<LatestGroup[]>([])
 const latestTotal = ref(0)
-const latestPage = ref(1)
+const latestPage = ref(Number(route.query.page) || 1)
 const LATEST_PAGE_SIZE = 12
 const popularSeries = ref<Series[]>([])
 const latestLoading = ref(false)
@@ -200,7 +201,7 @@ const latestPageNumbers = computed(() => {
 
 function goLatestPage(p: number) {
   latestPage.value = Math.max(1, Math.min(p, latestTotalPages.value))
-  loadLatest()
+  router.push({ query: { ...route.query, page: latestPage.value === 1 ? undefined : String(latestPage.value) } })
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
@@ -280,6 +281,11 @@ async function loadLatest() {
     latestLoading.value = false
   }
 }
+
+watch(() => route.query.page, (p) => {
+  latestPage.value = Number(p) || 1
+  loadLatest()
+})
 
 watch(() => [route.meta.lang, route.query.status, route.query.sort], () => {
   activeGenre.value = ''
