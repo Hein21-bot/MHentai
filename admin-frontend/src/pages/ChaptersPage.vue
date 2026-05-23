@@ -64,7 +64,7 @@
             </button>
             <button @click="doScrapeAllImages" :disabled="bulkScraping"
               class="text-xs px-3 py-1.5 bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap">
-              {{ bulkScraping ? `Scraping ${bulkProgress}/${bulkTotal}...` : 'Get All Images' }}
+              {{ bulkScraping ? `Scraping ${bulkProgress}/${bulkTotal}...` : 'Get Images (this page)' }}
             </button>
             <input v-model="chapterSearch" type="text" placeholder="Search chapters..." class="form-input w-48"/>
           </div>

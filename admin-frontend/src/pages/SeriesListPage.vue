@@ -333,7 +333,7 @@ async function rescrapeImages(s: any) {
   if (!confirm(`Re-scrape all chapter images for "${s.title}"? This may take a while.`)) return
   rescraping.value = s.id
   try {
-    const res = await api.post('/admin/import/mangaboost/rescrape', { series_id: s.id })
+    const res = await api.post('/admin/import/rescrape', { series_id: s.id })
     alert(`✓ Done: ${res.data.updated} chapters updated, ${res.data.failed} failed.`)
   } catch (e: any) {
     alert('Failed: ' + (e.response?.data?.error || e.message))

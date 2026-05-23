@@ -160,7 +160,7 @@ function handleChapterFiles(e: Event) {
 
 async function loadSeries() {
   try {
-    const res = await api.get('/admin/series?limit=200')
+    const res = await api.get('/admin/series?limit=500')
     seriesList.value = res.data.data || []
   } catch {}
 }

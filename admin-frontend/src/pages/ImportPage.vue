@@ -9,7 +9,7 @@
           activeTab === 'hentai20'
             ? 'border-indigo-500 text-indigo-400'
             : 'border-transparent text-gray-500 hover:text-gray-300']">
-        Hentai20.io
+        manhwamyanmar.com
       </button>
       <button
         @click="activeTab = 'mangaboost'"
@@ -363,7 +363,7 @@ function makeState(): ImportState {
     importError: '',
     result: null,
     logs: [],
-    force: true,
+    force: false,
     rangeFrom: null,
     rangeTo: null,
   }

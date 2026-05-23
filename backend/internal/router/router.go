@@ -82,6 +82,7 @@ func New(adminToken string) *gin.Engine {
 		admin.POST("/import/mangaboost/preview", handlers.AdminPreviewMangaBoost)
 		admin.POST("/import/mangaboost", handlers.AdminImportMangaBoost)
 		admin.POST("/import/mangaboost/rescrape", handlers.AdminRescrapeSeriesImages)
+		admin.POST("/import/rescrape", handlers.AdminRescrapeSeries)
 	}
 
 	return r

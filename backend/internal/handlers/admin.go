@@ -1293,6 +1293,50 @@ func AdminRescrapeSeriesImages(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"updated": updated, "failed": failed})
 }
 
+// AdminRescrapeSeries POST /api/admin/import/rescrape
+// Re-scrapes chapter images for all chapters of a series using the general scraper (works for all sources).
+func AdminRescrapeSeries(c *gin.Context) {
+	var req struct {
+		SeriesID string `json:"series_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	series, err := repository.GetSeriesByID(c.Request.Context(), req.SeriesID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "series not found"})
+		return
+	}
+
+	chapters, err := repository.ListAllChapters(c.Request.Context(), req.SeriesID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	updated, failed := 0, 0
+	for _, ch := range chapters {
+		if ch.SourceURL == "" {
+			continue
+		}
+		imgs := scrapeAndOptionallyProxy(c.Request.Context(), ch.SourceURL, series.Slug, ch.Slug, true)
+		if len(imgs) == 0 {
+			failed++
+			continue
+		}
+		if err := repository.UpdateChapterImages(c.Request.Context(), ch.ID, imgs, ch.SourceURL); err != nil {
+			failed++
+			continue
+		}
+		updated++
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"updated": updated, "failed": failed})
+}
+
 // AdminUploadSeriesCover POST /api/admin/upload/series-cover
 func AdminUploadSeriesCover(c *gin.Context) {
 	seriesID := c.PostForm("series_id")

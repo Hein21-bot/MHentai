@@ -59,7 +59,7 @@
       <header class="bg-[#12121a] border-b border-white/10 px-6 py-3 flex items-center gap-3">
         <h1 class="text-white font-semibold text-sm">{{ pageTitle }}</h1>
         <button @click="toggleTheme" class="ml-auto inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20">
-          <span>{{ theme === 'dark' ? 'Dark Mode' : 'Light Mode' }}</span>
+          <span>{{ theme === 'dark' ? 'Switch to Light' : 'Switch to Dark' }}</span>
           <svg v-if="theme === 'dark'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3v2M12 19v2M5.6 5.6l1.4 1.4M16.99 16.99l1.4 1.4M3 12h2M19 12h2M5.6 18.4l1.4-1.4M16.99 7.01l1.4-1.4M12 7a5 5 0 100 10 5 5 0 000-10z"/></svg>
           <svg v-else class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
         </button>

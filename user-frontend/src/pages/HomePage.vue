@@ -287,7 +287,7 @@ watch(() => route.query.page, (p) => {
   loadLatest()
 })
 
-watch(() => [route.meta.lang, route.query.status, route.query.sort], () => {
+watch([() => route.meta.lang, () => route.query.status, () => route.query.sort], () => {
   activeGenre.value = ''
   latestPage.value = 1
   loadPopular()
