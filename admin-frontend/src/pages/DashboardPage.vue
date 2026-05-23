@@ -41,7 +41,7 @@
           <RouterLink to="/import" class="flex items-center gap-3 p-3 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-600/30 rounded-lg transition-colors group">
             <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
             <div>
-              <p class="text-white text-sm font-medium">Import from hentai20.io</p>
+              <p class="text-white text-sm font-medium">Import from manhwamyanmar.com</p>
               <p class="text-gray-500 text-xs">Scrape and save series + chapters</p>
             </div>
           </RouterLink>

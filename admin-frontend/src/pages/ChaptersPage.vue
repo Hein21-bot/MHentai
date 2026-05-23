@@ -319,7 +319,7 @@ async function doDelete() {
 onMounted(async () => {
   seriesLoading.value = true
   try {
-    const res = await api.get('/admin/series')
+    const res = await api.get('/admin/series', { params: { limit: 500 } })
     seriesList.value = res.data.data
   } catch {} finally {
     seriesLoading.value = false

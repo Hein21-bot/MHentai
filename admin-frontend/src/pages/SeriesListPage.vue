@@ -54,7 +54,7 @@
               </span>
             </td>
             <td class="px-4 py-3 text-gray-400 text-sm">{{ s.chapter_count }}</td>
-            <td class="px-4 py-3 text-gray-400 text-sm">{{ s.view_count.toLocaleString() }}</td>
+            <td class="px-4 py-3 text-gray-400 text-sm">{{ (s.view_count ?? 0).toLocaleString() }}</td>
             <td class="px-4 py-3">
               <div class="flex items-center justify-end gap-2">
                 <button @click="openSync(s)" class="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
@@ -123,6 +123,10 @@
         <div>
           <label class="text-xs text-gray-500 mb-1 block">Description</label>
           <textarea v-model="editForm.description" rows="3" class="form-input w-full resize-none"/>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">Source URL <span class="text-gray-600">(used for auto-import)</span></label>
+          <input v-model="editForm.source_url" type="text" class="form-input w-full" placeholder="https://adult.manhwamyanmar.com/manga/..."/>
         </div>
         <div v-if="editError" class="text-red-400 text-xs">{{ editError }}</div>
         <div class="flex gap-3 pt-1">
@@ -300,11 +304,11 @@ async function deleteEmpty() {
 const editTarget = ref<any>(null)
 const editSaving = ref(false)
 const editError = ref('')
-const editForm = ref({ title: '', language: 'en', author: '', genres: '', description: '' })
+const editForm = ref({ title: '', language: 'en', author: '', genres: '', description: '', source_url: '' })
 
 function openEdit(s: any) {
   editTarget.value = s
-  editForm.value = { title: s.title || '', language: s.language || 'en', author: s.author || '', genres: s.genres || '', description: s.description || '' }
+  editForm.value = { title: s.title || '', language: s.language || 'en', author: s.author || '', genres: s.genres || '', description: s.description || '', source_url: s.source_url || '' }
   editError.value = ''
 }
 
