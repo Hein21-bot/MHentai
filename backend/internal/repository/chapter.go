@@ -286,9 +286,7 @@ func ListChaptersPage(ctx context.Context, seriesID string, limit int32, cursor 
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":sid": &types.AttributeValueMemberS{Value: seriesID},
 		},
-		ProjectionExpression:     aws.String(chapterLiteProjection),
-		ExpressionAttributeNames: chapterLiteNames,
-		Limit:                    aws.Int32(limit),
+		Limit: aws.Int32(limit),
 	}
 
 	if cursor != "" {
