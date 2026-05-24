@@ -2,16 +2,12 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8080/api',
+  headers: { 'X-Admin-Token': localStorage.getItem('admin_token') || 'admin123' },
   timeout: 600000, // 10 min — imports with images can be slow
 })
 
 api.interceptors.request.use(config => {
-  let token = localStorage.getItem('admin_token')
-  if (!token) {
-    token = prompt('Enter admin token:') || ''
-    if (token) localStorage.setItem('admin_token', token)
-  }
-  config.headers['X-Admin-Token'] = token
+  config.headers['X-Admin-Token'] = localStorage.getItem('admin_token') || 'admin123'
   return config
 })
 

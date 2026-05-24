@@ -559,14 +559,18 @@ func AdminImport(c *gin.Context) {
 		newlyCreated = true
 	} else {
 		// Existing series found; update metadata if changed.
-		_ = repository.UpdateSeriesFields(c.Request.Context(), series.ID, map[string]interface{}{
+		// Preserve user-uploaded cover: only set cover_url if none exists yet.
+		metaFields := map[string]interface{}{
 			"title":       info.Title,
-			"cover_url":   info.CoverURL,
 			"description": info.Description,
 			"status":      info.Status,
 			"author":      info.Author,
 			"genres":      strings.Join(info.Genres, ", "),
-		})
+		}
+		if series.CoverURL == "" && info.CoverURL != "" {
+			metaFields["cover_url"] = info.CoverURL
+		}
+		_ = repository.UpdateSeriesFields(c.Request.Context(), series.ID, metaFields)
 	}
 
 	// Build chapter list to import.
@@ -1132,14 +1136,17 @@ func AdminImportMangaBoost(c *gin.Context) {
 			return
 		}
 	} else {
-		_ = repository.UpdateSeriesFields(c.Request.Context(), series.ID, map[string]interface{}{
+		mbMetaFields := map[string]interface{}{
 			"title":       info.Title,
-			"cover_url":   info.CoverURL,
 			"description": info.Description,
 			"status":      info.Status,
 			"author":      info.Author,
 			"genres":      strings.Join(info.Genres, ", "),
-		})
+		}
+		if series.CoverURL == "" && info.CoverURL != "" {
+			mbMetaFields["cover_url"] = info.CoverURL
+		}
+		_ = repository.UpdateSeriesFields(c.Request.Context(), series.ID, mbMetaFields)
 	}
 
 	// Build chapter list: prefer selected_chapters from preview (avoids slug mismatch),

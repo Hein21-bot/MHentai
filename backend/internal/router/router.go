@@ -13,10 +13,9 @@ func New(adminToken string) *gin.Engine {
 	r := gin.Default()
 
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://localhost:3001", "https://mhentai.pages.dev", "https://mybooks.sbs",},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-Admin-Token"},
-		AllowCredentials: true,
+		AllowAllOrigins: true,
+		AllowMethods:    []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
+		AllowHeaders:    []string{"Origin", "Content-Type", "Authorization", "X-Admin-Token"},
 	}))
 
 	r.GET("/health", func(c *gin.Context) {
