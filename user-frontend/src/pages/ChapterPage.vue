@@ -131,25 +131,28 @@
 
       <!-- ── Bottom nav ── -->
       <div class="max-w-3xl mx-auto px-4 py-8">
-        <div class="flex items-center justify-center gap-3 flex-wrap">
+        <div class="grid grid-cols-3 gap-2">
           <button v-if="data.prev_chapter?.slug"
             @click="goToChapterAd(data.prev_chapter.slug)"
-            class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900 dark:bg-white/10 dark:hover:bg-white/20 dark:text-white/70 dark:hover:text-white text-sm font-medium transition-all border border-gray-200 dark:border-white/10">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m15 19-7-7 7-7"/></svg>
-            Prev Chapter
+            class="flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900 dark:bg-white/10 dark:hover:bg-white/20 dark:text-white/70 dark:hover:text-white text-xs sm:text-sm font-medium transition-all border border-gray-200 dark:border-white/10">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m15 19-7-7 7-7"/></svg>
+            <span class="truncate">Prev</span>
           </button>
+          <div v-else/>
           <RouterLink v-if="data.chapter.series"
             :to="`/${route.meta.lang}/series/${data.chapter.series.slug}`"
-            class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900 dark:bg-white/10 dark:hover:bg-white/20 dark:text-white/70 dark:hover:text-white text-sm font-medium transition-all border border-gray-200 dark:border-white/10">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
-            Chapter List
+            class="flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900 dark:bg-white/10 dark:hover:bg-white/20 dark:text-white/70 dark:hover:text-white text-xs sm:text-sm font-medium transition-all border border-gray-200 dark:border-white/10">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+            <span class="truncate">Chapters</span>
           </RouterLink>
+          <div v-else/>
           <button v-if="data.next_chapter?.slug"
             @click="goToChapterAd(data.next_chapter.slug)"
-            class="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-primary hover:bg-primary-600 text-white text-sm font-bold transition-all shadow-lg shadow-primary/20">
-            Next Chapter
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 5 7 7-7 7"/></svg>
+            class="flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl bg-primary hover:bg-primary-600 text-white text-xs sm:text-sm font-bold transition-all shadow-lg shadow-primary/20">
+            <span class="truncate">Next</span>
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 5 7 7-7 7"/></svg>
           </button>
+          <div v-else/>
         </div>
       </div>
 

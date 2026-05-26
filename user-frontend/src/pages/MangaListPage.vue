@@ -136,7 +136,7 @@ const pageNumbers = computed(() => {
   const t = totalPages.value
   const cur = currentPage.value
   const pages: (number | '…')[] = []
-  if (t <= 7) {
+  if (t <= 5) {
     for (let i = 1; i <= t; i++) pages.push(i)
   } else {
     pages.push(1)

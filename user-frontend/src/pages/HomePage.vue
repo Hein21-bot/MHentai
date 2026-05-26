@@ -187,7 +187,7 @@ const latestPageNumbers = computed(() => {
   const total = latestTotalPages.value
   const cur = latestPage.value
   const pages: (number | '…')[] = []
-  if (total <= 7) {
+  if (total <= 5) {
     for (let i = 1; i <= total; i++) pages.push(i)
   } else {
     pages.push(1)
