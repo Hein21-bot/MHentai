@@ -209,9 +209,9 @@ async function fetchChaptersPage(seriesId: string, page: number) {
     chapters.value = (res.data.data as any[]).map(ch => ({ ...ch, image_count: ch.image_count ?? 0 }))
     const next = res.data.next_cursor ?? ''
     chapterHasMore.value = !!next
-    // Store cursor for the next page if we don't have it yet
-    if (next && !chapterCursors.value[page]) {
-      chapterCursors.value[page] = next
+    // Store cursor for the next page only when advancing forward
+    if (next && chapterCursors.value.length === page) {
+      chapterCursors.value.push(next)
     }
   } catch {} finally {
     chaptersLoading.value = false

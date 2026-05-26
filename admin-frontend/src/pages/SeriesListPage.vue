@@ -262,11 +262,13 @@ const deletingEmpty = ref(false)
 const deletingOrphans = ref(false)
 
 function pollOrphanStatus() {
+  let retries = 0
   const timer = setInterval(async () => {
     try {
       const res = await api.get('/admin/chapters/orphaned/status')
       if (!res.data.running) { clearInterval(timer); deletingOrphans.value = false }
     } catch { clearInterval(timer); deletingOrphans.value = false }
+    if (++retries >= 60) { clearInterval(timer); deletingOrphans.value = false }
   }, 5000)
 }
 
