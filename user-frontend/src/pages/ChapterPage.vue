@@ -201,7 +201,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { chapterApi, seriesApi } from '@/services/api'
 import { addReadHistory } from '@/services/history'
@@ -340,8 +340,21 @@ async function load() {
   }
 }
 
-watch(() => route.params.slug, load)
-onMounted(load)
+function injectVideoSliderAd() {
+  document.querySelectorAll('script[src*="kookycommittee.com"]').forEach(el => el.remove())
+  const s = document.createElement('script');
+  (s as any).settings = {}
+  s.src = '//kookycommittee.com/bJXpVBs.d/GTlb0cYaW/cb/FezmC9aukZzUul/kHP/TEcVwZOqDmYW4/N/jKE/tzNTz-AC4ZNEjkge2vNSQn'
+  s.async = true
+  s.referrerPolicy = 'no-referrer-when-downgrade'
+  document.body.appendChild(s)
+}
+
+watch(() => route.params.slug, async () => { await load(); injectVideoSliderAd() })
+onMounted(async () => { await load(); injectVideoSliderAd() })
+onBeforeUnmount(() => {
+  document.querySelectorAll('script[src*="kookycommittee.com"]').forEach(el => el.remove())
+})
 </script>
 
 <style scoped>
