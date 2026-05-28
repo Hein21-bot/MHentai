@@ -1480,3 +1480,537 @@ func AdminUploadChapterImages(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "images_count": len(urls), "images": urls})
 }
+
+// AdminPreviewManhwaMyanmar POST /api/admin/import/manhwamyanmar/preview
+func AdminPreviewManhwaMyanmar(c *gin.Context) {
+	var req struct {
+		URL string `json:"url" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	info, err := scraper.ScrapeManhwaMyamarSeries(req.URL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("scrape failed: %v", err)})
+		return
+	}
+	if info.Title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "could not extract series title from that URL"})
+		return
+	}
+
+	type chapterPreview struct {
+		Title  string  `json:"title"`
+		Number float64 `json:"number"`
+		Slug   string  `json:"slug"`
+		URL    string  `json:"url"`
+	}
+	chapters := make([]chapterPreview, 0, len(info.Chapters))
+	for _, ch := range info.Chapters {
+		slug := ch.Slug
+		if slug == "" {
+			slug = fmt.Sprintf("%s-chapter-%.0f", makeSlug(info.Title), ch.Number)
+		}
+		chapters = append(chapters, chapterPreview{
+			Title:  ch.Title,
+			Number: ch.Number,
+			Slug:   slug,
+			URL:    ch.URL,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"title":       info.Title,
+		"cover_url":   info.CoverURL,
+		"description": info.Description,
+		"status":      info.Status,
+		"author":      info.Author,
+		"genres":      strings.Join(info.Genres, ", "),
+		"chapters":    chapters,
+	})
+}
+
+// AdminImportManhwaMyanmar POST /api/admin/import/manhwamyanmar
+func AdminImportManhwaMyanmar(c *gin.Context) {
+	var req struct {
+		URL              string               `json:"url" binding:"required"`
+		SelectedChapters []ImportChapterInput `json:"selected_chapters"`
+		SelectedSlugs    []string             `json:"selected_slugs"`
+		Force            bool                 `json:"force"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	info, err := scraper.ScrapeManhwaMyamarSeries(req.URL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("scrape failed: %v", err)})
+		return
+	}
+	if info.Title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "could not extract series title"})
+		return
+	}
+
+	series, err := repository.GetSeriesBySourceURL(c.Request.Context(), req.URL)
+	if err != nil && err != repository.ErrNotFound {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("finding existing series: %v", err)})
+		return
+	}
+
+	if series == nil {
+		baseSlug := info.Slug
+		if baseSlug == "" {
+			baseSlug = makeSlug(info.Title)
+		}
+		if existing, err := repository.GetSeriesBySlug(c.Request.Context(), baseSlug); err == nil && existing != nil {
+			series = existing
+		}
+	}
+
+	mmNewlyCreated := false
+	if series == nil {
+		baseSlug := info.Slug
+		if baseSlug == "" {
+			baseSlug = makeSlug(info.Title)
+		}
+		slug := baseSlug
+		for i := 1; ; i++ {
+			exists, _ := repository.SlugExists(c.Request.Context(), slug)
+			if !exists {
+				break
+			}
+			slug = fmt.Sprintf("%s-%d", baseSlug, i)
+		}
+
+		coverURL := info.CoverURL
+		if storage.R2 != nil && storage.R2.Enabled() && coverURL != "" {
+			key := storage.CoverKey(slug, coverURL)
+			if uploaded, err := storage.R2.UploadFromURL(c.Request.Context(), coverURL, key); err == nil {
+				coverURL = uploaded
+			}
+		}
+
+		series = &models.Series{
+			ID:          uuid.NewString(),
+			Slug:        slug,
+			Title:       info.Title,
+			CoverURL:    coverURL,
+			Description: info.Description,
+			Status:      info.Status,
+			Author:      info.Author,
+			Genres:      strings.Join(info.Genres, ", "),
+			Language:    "my",
+			SourceURL:   req.URL,
+		}
+		if err := repository.PutSeries(c.Request.Context(), series); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("saving series: %v", err)})
+			return
+		}
+		mmNewlyCreated = true
+	} else {
+		metaFields := map[string]interface{}{
+			"title":       info.Title,
+			"description": info.Description,
+			"status":      info.Status,
+			"author":      info.Author,
+			"genres":      strings.Join(info.Genres, ", "),
+		}
+		if series.CoverURL == "" && info.CoverURL != "" {
+			metaFields["cover_url"] = info.CoverURL
+		}
+		_ = repository.UpdateSeriesFields(c.Request.Context(), series.ID, metaFields)
+	}
+
+	type mmEntry struct {
+		Slug  string
+		Title string
+		Num   float64
+		URL   string
+	}
+	var mmToImport []mmEntry
+	if len(req.SelectedChapters) > 0 {
+		for _, ch := range req.SelectedChapters {
+			mmToImport = append(mmToImport, mmEntry{ch.Slug, ch.Title, ch.Number, ch.URL})
+		}
+	} else {
+		selectedSlugs := make(map[string]bool, len(req.SelectedSlugs))
+		for _, s := range req.SelectedSlugs {
+			selectedSlugs[s] = true
+		}
+		for _, ch := range info.Chapters {
+			chSlug := ch.Slug
+			if chSlug == "" {
+				chSlug = fmt.Sprintf("%s-chapter-%.0f", series.Slug, ch.Number)
+			}
+			if len(selectedSlugs) > 0 && !selectedSlugs[chSlug] {
+				continue
+			}
+			mmToImport = append(mmToImport, mmEntry{chSlug, ch.Title, ch.Number, ch.URL})
+		}
+	}
+
+	if len(mmToImport) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": true, "series": nil, "chapters_saved": 0, "chapters_skipped": 0, "chapters_failed": []float64{}})
+		return
+	}
+
+	jobID := uuid.NewString()
+	job := &ImportJob{
+		Running:  true,
+		Total:    len(mmToImport),
+		Failed:   []float64{},
+		SeriesID: series.ID,
+		Title:    series.Title,
+	}
+	importJobsMu.Lock()
+	importJobs[jobID] = job
+	importJobsMu.Unlock()
+
+	bgCtx := context.Background()
+	seriesSlug := series.Slug
+	seriesChapterCount := series.ChapterCount
+	force := req.Force
+	isMmNew := mmNewlyCreated
+	go func() {
+		defer func() {
+			importJobsMu.Lock()
+			job.Running = false
+			importJobsMu.Unlock()
+		}()
+		for _, ch := range mmToImport {
+			chSlug := ch.Slug
+			if chSlug == "" {
+				chSlug = fmt.Sprintf("%s-chapter-%.0f", seriesSlug, ch.Num)
+			}
+			existingID, _ := repository.GetChapterIDBySlug(bgCtx, chSlug)
+			if existingID != "" {
+				if !force {
+					importJobsMu.Lock()
+					job.Skipped++
+					job.Done++
+					importJobsMu.Unlock()
+					continue
+				}
+				_ = repository.DeleteChapter(bgCtx, existingID)
+			}
+			chapter := &models.Chapter{
+				ID:        uuid.NewString(),
+				SeriesID:  series.ID,
+				Slug:      chSlug,
+				Title:     ch.Title,
+				Number:    ch.Num,
+				Language:  "my",
+				SourceURL: ch.URL,
+			}
+			if ch.URL != "" {
+				imgs, imgErr := scraper.ScrapeManhwaMyamarChapterImages(ch.URL)
+				if imgErr == nil && len(imgs) > 0 {
+					chapter.Images = imgs
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+			importJobsMu.Lock()
+			if err := repository.PutChapter(bgCtx, chapter); err != nil {
+				job.Failed = append(job.Failed, ch.Num)
+			} else {
+				job.Saved++
+			}
+			job.Done++
+			importJobsMu.Unlock()
+		}
+		importJobsMu.RLock()
+		saved := job.Saved
+		importJobsMu.RUnlock()
+		_ = repository.UpdateSeriesFields(bgCtx, series.ID, map[string]interface{}{
+			"chapter_count": seriesChapterCount + saved,
+		})
+		if isMmNew {
+			telegram.NotifyNewSeries(telegram.SeriesInfo{
+				Title:        series.Title,
+				Description:  series.Description,
+				CoverURL:     series.CoverURL,
+				ChapterCount: seriesChapterCount + saved,
+				Status:       series.Status,
+				Genres:       series.Genres,
+				Slug:         series.Slug,
+			})
+		}
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"job_id": jobID,
+		"series": series,
+		"total":  len(mmToImport),
+	})
+}
+
+// AdminPreviewYotepya POST /api/admin/import/yotepya/preview
+func AdminPreviewYotepya(c *gin.Context) {
+	var req struct {
+		URL string `json:"url" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	info, err := scraper.ScrapeYotepyaSeries(req.URL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("scrape failed: %v", err)})
+		return
+	}
+	if info.Title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "could not extract series title from that URL"})
+		return
+	}
+
+	type chapterPreview struct {
+		Title  string  `json:"title"`
+		Number float64 `json:"number"`
+		Slug   string  `json:"slug"`
+		URL    string  `json:"url"`
+	}
+	chapters := make([]chapterPreview, 0, len(info.Chapters))
+	for _, ch := range info.Chapters {
+		slug := ch.Slug
+		if slug == "" {
+			slug = fmt.Sprintf("%s-chapter-%.0f", makeSlug(info.Title), ch.Number)
+		}
+		chapters = append(chapters, chapterPreview{
+			Title:  ch.Title,
+			Number: ch.Number,
+			Slug:   slug,
+			URL:    ch.URL,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"title":       info.Title,
+		"cover_url":   info.CoverURL,
+		"description": info.Description,
+		"status":      info.Status,
+		"author":      info.Author,
+		"genres":      strings.Join(info.Genres, ", "),
+		"chapters":    chapters,
+	})
+}
+
+// AdminImportYotepya POST /api/admin/import/yotepya
+func AdminImportYotepya(c *gin.Context) {
+	var req struct {
+		URL              string               `json:"url" binding:"required"`
+		SelectedChapters []ImportChapterInput `json:"selected_chapters"`
+		SelectedSlugs    []string             `json:"selected_slugs"`
+		Force            bool                 `json:"force"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	info, err := scraper.ScrapeYotepyaSeries(req.URL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("scrape failed: %v", err)})
+		return
+	}
+	if info.Title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "could not extract series title"})
+		return
+	}
+
+	series, err := repository.GetSeriesBySourceURL(c.Request.Context(), req.URL)
+	if err != nil && err != repository.ErrNotFound {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("finding existing series: %v", err)})
+		return
+	}
+
+	if series == nil {
+		baseSlug := info.Slug
+		if baseSlug == "" {
+			baseSlug = makeSlug(info.Title)
+		}
+		if existing, err := repository.GetSeriesBySlug(c.Request.Context(), baseSlug); err == nil && existing != nil {
+			series = existing
+		}
+	}
+
+	ytNewlyCreated := false
+	if series == nil {
+		baseSlug := info.Slug
+		if baseSlug == "" {
+			baseSlug = makeSlug(info.Title)
+		}
+		slug := baseSlug
+		for i := 1; ; i++ {
+			exists, _ := repository.SlugExists(c.Request.Context(), slug)
+			if !exists {
+				break
+			}
+			slug = fmt.Sprintf("%s-%d", baseSlug, i)
+		}
+
+		coverURL := info.CoverURL
+		if storage.R2 != nil && storage.R2.Enabled() && coverURL != "" {
+			key := storage.CoverKey(slug, coverURL)
+			if uploaded, err := storage.R2.UploadFromURL(c.Request.Context(), coverURL, key); err == nil {
+				coverURL = uploaded
+			}
+		}
+
+		series = &models.Series{
+			ID:          uuid.NewString(),
+			Slug:        slug,
+			Title:       info.Title,
+			CoverURL:    coverURL,
+			Description: info.Description,
+			Status:      info.Status,
+			Author:      info.Author,
+			Genres:      strings.Join(info.Genres, ", "),
+			Language:    "my",
+			SourceURL:   req.URL,
+		}
+		if err := repository.PutSeries(c.Request.Context(), series); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("saving series: %v", err)})
+			return
+		}
+		ytNewlyCreated = true
+	} else {
+		metaFields := map[string]interface{}{
+			"title":       info.Title,
+			"description": info.Description,
+			"status":      info.Status,
+			"author":      info.Author,
+			"genres":      strings.Join(info.Genres, ", "),
+		}
+		if series.CoverURL == "" && info.CoverURL != "" {
+			metaFields["cover_url"] = info.CoverURL
+		}
+		_ = repository.UpdateSeriesFields(c.Request.Context(), series.ID, metaFields)
+	}
+
+	type ytEntry struct {
+		Slug  string
+		Title string
+		Num   float64
+		URL   string
+	}
+	var ytToImport []ytEntry
+	if len(req.SelectedChapters) > 0 {
+		for _, ch := range req.SelectedChapters {
+			ytToImport = append(ytToImport, ytEntry{ch.Slug, ch.Title, ch.Number, ch.URL})
+		}
+	} else {
+		selectedSlugs := make(map[string]bool, len(req.SelectedSlugs))
+		for _, s := range req.SelectedSlugs {
+			selectedSlugs[s] = true
+		}
+		for _, ch := range info.Chapters {
+			chSlug := ch.Slug
+			if chSlug == "" {
+				chSlug = fmt.Sprintf("%s-chapter-%.0f", series.Slug, ch.Number)
+			}
+			if len(selectedSlugs) > 0 && !selectedSlugs[chSlug] {
+				continue
+			}
+			ytToImport = append(ytToImport, ytEntry{chSlug, ch.Title, ch.Number, ch.URL})
+		}
+	}
+
+	if len(ytToImport) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": true, "series": nil, "chapters_saved": 0, "chapters_skipped": 0, "chapters_failed": []float64{}})
+		return
+	}
+
+	jobID := uuid.NewString()
+	job := &ImportJob{
+		Running:  true,
+		Total:    len(ytToImport),
+		Failed:   []float64{},
+		SeriesID: series.ID,
+		Title:    series.Title,
+	}
+	importJobsMu.Lock()
+	importJobs[jobID] = job
+	importJobsMu.Unlock()
+
+	bgCtx := context.Background()
+	seriesSlug := series.Slug
+	seriesChapterCount := series.ChapterCount
+	force := req.Force
+	isYtNew := ytNewlyCreated
+	go func() {
+		defer func() {
+			importJobsMu.Lock()
+			job.Running = false
+			importJobsMu.Unlock()
+		}()
+		for _, ch := range ytToImport {
+			chSlug := ch.Slug
+			if chSlug == "" {
+				chSlug = fmt.Sprintf("%s-chapter-%.0f", seriesSlug, ch.Num)
+			}
+			existingID, _ := repository.GetChapterIDBySlug(bgCtx, chSlug)
+			if existingID != "" {
+				if !force {
+					importJobsMu.Lock()
+					job.Skipped++
+					job.Done++
+					importJobsMu.Unlock()
+					continue
+				}
+				_ = repository.DeleteChapter(bgCtx, existingID)
+			}
+			chapter := &models.Chapter{
+				ID:        uuid.NewString(),
+				SeriesID:  series.ID,
+				Slug:      chSlug,
+				Title:     ch.Title,
+				Number:    ch.Num,
+				Language:  "my",
+				SourceURL: ch.URL,
+			}
+			if ch.URL != "" {
+				imgs, imgErr := scraper.ScrapeYotepyaChapterImages(ch.URL)
+				if imgErr == nil && len(imgs) > 0 {
+					chapter.Images = imgs
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+			importJobsMu.Lock()
+			if err := repository.PutChapter(bgCtx, chapter); err != nil {
+				job.Failed = append(job.Failed, ch.Num)
+			} else {
+				job.Saved++
+			}
+			job.Done++
+			importJobsMu.Unlock()
+		}
+		importJobsMu.RLock()
+		saved := job.Saved
+		importJobsMu.RUnlock()
+		_ = repository.UpdateSeriesFields(bgCtx, series.ID, map[string]interface{}{
+			"chapter_count": seriesChapterCount + saved,
+		})
+		if isYtNew {
+			telegram.NotifyNewSeries(telegram.SeriesInfo{
+				Title:        series.Title,
+				Description:  series.Description,
+				CoverURL:     series.CoverURL,
+				ChapterCount: seriesChapterCount + saved,
+				Status:       series.Status,
+				Genres:       series.Genres,
+				Slug:         series.Slug,
+			})
+		}
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"job_id": jobID,
+		"series": series,
+		"total":  len(ytToImport),
+	})
+}

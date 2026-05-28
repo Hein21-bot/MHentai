@@ -9,7 +9,7 @@
           activeTab === 'hentai20'
             ? 'border-indigo-500 text-indigo-400'
             : 'border-transparent text-gray-500 hover:text-gray-300']">
-        manhwamyanmar.com
+        hentai20.io
       </button>
       <button
         @click="activeTab = 'mangaboost'"
@@ -18,6 +18,22 @@
             ? 'border-indigo-500 text-indigo-400'
             : 'border-transparent text-gray-500 hover:text-gray-300']">
         MangaBoost
+      </button>
+      <button
+        @click="activeTab = 'manhwamyanmar'"
+        :class="['px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
+          activeTab === 'manhwamyanmar'
+            ? 'border-indigo-500 text-indigo-400'
+            : 'border-transparent text-gray-500 hover:text-gray-300']">
+        ManhwaMyanmar
+      </button>
+      <button
+        @click="activeTab = 'yotepya'"
+        :class="['px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
+          activeTab === 'yotepya'
+            ? 'border-indigo-500 text-indigo-400'
+            : 'border-transparent text-gray-500 hover:text-gray-300']">
+        YotePya
       </button>
     </div>
 
@@ -311,6 +327,284 @@
       </template>
     </template>
 
+    <!-- ───── ManhwaMyanmar Tab ───── -->
+    <template v-if="activeTab === 'manhwamyanmar'">
+
+      <div class="admin-card">
+        <h2 class="text-white font-bold text-lg mb-1">Import from adult.manhwamyanmar.com</h2>
+        <p class="text-gray-500 text-sm mb-5">Paste a series URL to preview and import chapters.</p>
+        <div class="flex gap-3">
+          <input v-model="mm.url" type="url" placeholder="https://adult.manhwamyanmar.com/series-name/"
+            class="form-input flex-1" @keydown.enter="mmPreview" :disabled="mm.previewing || mm.importing"/>
+          <button @click="mmPreview" :disabled="mm.previewing || !mm.url.trim() || mm.importing"
+            class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+            <svg v-if="mm.previewing" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            {{ mm.previewing ? 'Fetching...' : 'Preview' }}
+          </button>
+        </div>
+        <p v-if="mm.previewError" class="mt-3 text-red-400 text-sm">{{ mm.previewError }}</p>
+      </div>
+
+      <template v-if="mm.preview">
+        <div class="admin-card">
+          <div class="flex gap-4">
+            <img v-if="mm.preview.cover_url" :src="mm.preview.cover_url" :alt="mm.preview.title"
+              class="w-24 h-36 object-cover rounded-lg flex-shrink-0" @error="(e) => (e.target as HTMLImageElement).style.display='none'"/>
+            <div v-else class="w-24 h-36 bg-[#12121a] rounded-lg flex-shrink-0"/>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start gap-2 flex-wrap">
+                <h3 class="text-white font-bold text-lg">{{ mm.preview.title }}</h3>
+                <span :class="['text-xs px-2 py-0.5 rounded-full font-medium mt-1',
+                  mm.preview.status === 'ongoing' ? 'bg-green-600/20 text-green-400' : 'bg-blue-600/20 text-blue-400']">
+                  {{ mm.preview.status }}
+                </span>
+              </div>
+              <p v-if="mm.preview.author" class="text-gray-500 text-sm mt-1">{{ mm.preview.author }}</p>
+              <p v-if="mm.preview.genres" class="text-gray-600 text-xs mt-1">{{ mm.preview.genres }}</p>
+              <p v-if="mm.preview.description" class="text-gray-400 text-sm mt-2 line-clamp-3">{{ mm.preview.description }}</p>
+              <p class="text-gray-600 text-xs mt-2">{{ mm.preview.chapters.length }} chapters found</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-card">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-white font-semibold">Select Chapters to Import</h3>
+            <div class="flex items-center gap-3">
+              <button @click="mmSelectAll" class="text-xs text-indigo-400 hover:text-indigo-300">All</button>
+              <button @click="mmSelectNone" class="text-xs text-gray-500 hover:text-gray-300">None</button>
+              <span class="text-xs text-gray-600">{{ mm.selectedSlugs.size }} / {{ mm.preview.chapters.length }} selected</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 mb-3">
+            <span class="text-xs text-gray-500">From</span>
+            <input type="number" min="1" v-model.number="mm.rangeFrom" @change="mmSelectRange"
+              class="form-input w-20 text-sm py-1" placeholder="1"/>
+            <span class="text-xs text-gray-500">To</span>
+            <input type="number" min="1" v-model.number="mm.rangeTo" @change="mmSelectRange"
+              class="form-input w-20 text-sm py-1" placeholder="100"/>
+            <button @click="mmSelectRange" class="text-xs px-3 py-1 bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 rounded-lg transition-colors">
+              Apply
+            </button>
+          </div>
+          <div class="max-h-72 overflow-y-auto rounded-lg border border-white/10 divide-y divide-white/5">
+            <label v-for="ch in mm.preview.chapters" :key="ch.slug"
+              class="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-white/5 transition-colors">
+              <input type="checkbox"
+                :checked="mm.selectedSlugs.has(ch.slug)"
+                @change="mmToggleChapter(ch.slug)"
+                class="rounded accent-indigo-500 flex-shrink-0"/>
+              <span class="flex-1 text-sm text-gray-200 truncate">{{ ch.title || `Chapter ${ch.number}` }}</span>
+              <span class="text-xs text-gray-600 flex-shrink-0">Ch.{{ ch.number }}</span>
+            </label>
+          </div>
+          <div class="mt-3 flex items-center gap-2">
+            <input id="mm-force" type="checkbox" v-model="mm.force" class="rounded accent-orange-500"/>
+            <label for="mm-force" class="text-xs text-orange-400 cursor-pointer select-none">
+              Force re-import (overwrite already-imported chapters)
+            </label>
+          </div>
+          <div class="mt-3 flex gap-3">
+            <button @click="mmReset" class="px-4 py-2 border border-white/10 text-gray-400 rounded-lg hover:bg-white/5 text-sm">
+              ← New URL
+            </button>
+            <button @click="mmImport" :disabled="mm.importing || mm.selectedSlugs.size === 0"
+              class="flex-1 btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+              <svg v-if="mm.importing" class="w-4 h-4 animate-spin inline mr-1" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+              {{ mm.importing ? 'Importing...' : `Import ${mm.selectedSlugs.size} chapter${mm.selectedSlugs.size !== 1 ? 's' : ''}` }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="mm.logs.length > 0" class="admin-card">
+          <h3 class="text-white font-semibold mb-3">Import Log</h3>
+          <div class="space-y-1 font-mono text-xs max-h-48 overflow-y-auto">
+            <div v-for="(log, i) in mm.logs" :key="i"
+              :class="['py-0.5', log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-gray-400']">
+              {{ log.msg }}
+            </div>
+          </div>
+        </div>
+
+        <div v-if="mm.result" class="admin-card border-green-600/30">
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <div>
+              <p class="text-green-400 font-bold">Import Successful!</p>
+              <p class="text-gray-300 text-sm mt-1"><strong class="text-white">{{ mm.result.series?.title }}</strong></p>
+              <p class="text-gray-500 text-xs mt-0.5">{{ mm.result.chapters_saved }} saved, {{ mm.result.chapters_skipped }} skipped</p>
+              <p v-if="mm.result.chapters_failed?.length > 0" class="text-red-400 text-xs mt-1">
+                Failed: {{ mm.result.chapters_failed.map((n: number) => `Ch.${n}`).join(', ') }}
+              </p>
+              <div class="flex gap-2 mt-3">
+                <RouterLink to="/series" class="btn-primary text-xs py-1.5">View in Series</RouterLink>
+                <button @click="mmReset" class="px-3 py-1.5 border border-white/10 text-gray-400 rounded-lg hover:bg-white/5 text-xs">Import Another</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="mm.importError" class="admin-card border-red-600/30">
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <div>
+              <p class="text-red-400 font-bold">Import Failed</p>
+              <p class="text-gray-400 text-sm mt-1">{{ mm.importError }}</p>
+            </div>
+          </div>
+        </div>
+      </template>
+    </template>
+
+    <!-- ───── YotePya Tab ───── -->
+    <template v-if="activeTab === 'yotepya'">
+
+      <div class="admin-card">
+        <h2 class="text-white font-bold text-lg mb-1">Import from yotepya.com</h2>
+        <p class="text-gray-500 text-sm mb-5">Paste a series URL to preview and import chapters.</p>
+        <div class="flex gap-3">
+          <input v-model="yt.url" type="url" placeholder="https://yotepya.com/contents/71/"
+            class="form-input flex-1" @keydown.enter="ytPreview" :disabled="yt.previewing || yt.importing"/>
+          <button @click="ytPreview" :disabled="yt.previewing || !yt.url.trim() || yt.importing"
+            class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+            <svg v-if="yt.previewing" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            {{ yt.previewing ? 'Fetching...' : 'Preview' }}
+          </button>
+        </div>
+        <p v-if="yt.previewError" class="mt-3 text-red-400 text-sm">{{ yt.previewError }}</p>
+      </div>
+
+      <template v-if="yt.preview">
+        <div class="admin-card">
+          <div class="flex gap-4">
+            <img v-if="yt.preview.cover_url" :src="yt.preview.cover_url" :alt="yt.preview.title"
+              class="w-24 h-36 object-cover rounded-lg flex-shrink-0" @error="(e) => (e.target as HTMLImageElement).style.display='none'"/>
+            <div v-else class="w-24 h-36 bg-[#12121a] rounded-lg flex-shrink-0"/>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start gap-2 flex-wrap">
+                <h3 class="text-white font-bold text-lg">{{ yt.preview.title }}</h3>
+                <span :class="['text-xs px-2 py-0.5 rounded-full font-medium mt-1',
+                  yt.preview.status === 'ongoing' ? 'bg-green-600/20 text-green-400' : 'bg-blue-600/20 text-blue-400']">
+                  {{ yt.preview.status }}
+                </span>
+              </div>
+              <p v-if="yt.preview.author" class="text-gray-500 text-sm mt-1">{{ yt.preview.author }}</p>
+              <p v-if="yt.preview.genres" class="text-gray-600 text-xs mt-1">{{ yt.preview.genres }}</p>
+              <p v-if="yt.preview.description" class="text-gray-400 text-sm mt-2 line-clamp-3">{{ yt.preview.description }}</p>
+              <p class="text-gray-600 text-xs mt-2">{{ yt.preview.chapters.length }} chapters found</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-card">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-white font-semibold">Select Chapters to Import</h3>
+            <div class="flex items-center gap-3">
+              <button @click="ytSelectAll" class="text-xs text-indigo-400 hover:text-indigo-300">All</button>
+              <button @click="ytSelectNone" class="text-xs text-gray-500 hover:text-gray-300">None</button>
+              <span class="text-xs text-gray-600">{{ yt.selectedSlugs.size }} / {{ yt.preview.chapters.length }} selected</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 mb-3">
+            <span class="text-xs text-gray-500">From</span>
+            <input type="number" min="1" v-model.number="yt.rangeFrom" @change="ytSelectRange"
+              class="form-input w-20 text-sm py-1" placeholder="1"/>
+            <span class="text-xs text-gray-500">To</span>
+            <input type="number" min="1" v-model.number="yt.rangeTo" @change="ytSelectRange"
+              class="form-input w-20 text-sm py-1" placeholder="100"/>
+            <button @click="ytSelectRange" class="text-xs px-3 py-1 bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 rounded-lg transition-colors">
+              Apply
+            </button>
+          </div>
+          <div class="max-h-72 overflow-y-auto rounded-lg border border-white/10 divide-y divide-white/5">
+            <label v-for="ch in yt.preview.chapters" :key="ch.slug"
+              class="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-white/5 transition-colors">
+              <input type="checkbox"
+                :checked="yt.selectedSlugs.has(ch.slug)"
+                @change="ytToggleChapter(ch.slug)"
+                class="rounded accent-indigo-500 flex-shrink-0"/>
+              <span class="flex-1 text-sm text-gray-200 truncate">{{ ch.title || `Chapter ${ch.number}` }}</span>
+              <span class="text-xs text-gray-600 flex-shrink-0">Ch.{{ ch.number }}</span>
+            </label>
+          </div>
+          <div class="mt-3 flex items-center gap-2">
+            <input id="yt-force" type="checkbox" v-model="yt.force" class="rounded accent-orange-500"/>
+            <label for="yt-force" class="text-xs text-orange-400 cursor-pointer select-none">
+              Force re-import (overwrite already-imported chapters)
+            </label>
+          </div>
+          <div class="mt-3 flex gap-3">
+            <button @click="ytReset" class="px-4 py-2 border border-white/10 text-gray-400 rounded-lg hover:bg-white/5 text-sm">
+              ← New URL
+            </button>
+            <button @click="ytImport" :disabled="yt.importing || yt.selectedSlugs.size === 0"
+              class="flex-1 btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+              <svg v-if="yt.importing" class="w-4 h-4 animate-spin inline mr-1" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+              {{ yt.importing ? 'Importing...' : `Import ${yt.selectedSlugs.size} chapter${yt.selectedSlugs.size !== 1 ? 's' : ''}` }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="yt.logs.length > 0" class="admin-card">
+          <h3 class="text-white font-semibold mb-3">Import Log</h3>
+          <div class="space-y-1 font-mono text-xs max-h-48 overflow-y-auto">
+            <div v-for="(log, i) in yt.logs" :key="i"
+              :class="['py-0.5', log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-gray-400']">
+              {{ log.msg }}
+            </div>
+          </div>
+        </div>
+
+        <div v-if="yt.result" class="admin-card border-green-600/30">
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <div>
+              <p class="text-green-400 font-bold">Import Successful!</p>
+              <p class="text-gray-300 text-sm mt-1"><strong class="text-white">{{ yt.result.series?.title }}</strong></p>
+              <p class="text-gray-500 text-xs mt-0.5">{{ yt.result.chapters_saved }} saved, {{ yt.result.chapters_skipped }} skipped</p>
+              <p v-if="yt.result.chapters_failed?.length > 0" class="text-red-400 text-xs mt-1">
+                Failed: {{ yt.result.chapters_failed.map((n: number) => `Ch.${n}`).join(', ') }}
+              </p>
+              <div class="flex gap-2 mt-3">
+                <RouterLink to="/series" class="btn-primary text-xs py-1.5">View in Series</RouterLink>
+                <button @click="ytReset" class="px-3 py-1.5 border border-white/10 text-gray-400 rounded-lg hover:bg-white/5 text-xs">Import Another</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="yt.importError" class="admin-card border-red-600/30">
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <div>
+              <p class="text-red-400 font-bold">Import Failed</p>
+              <p class="text-gray-400 text-sm mt-1">{{ yt.importError }}</p>
+            </div>
+          </div>
+        </div>
+      </template>
+    </template>
+
   </div>
 </template>
 
@@ -369,9 +663,11 @@ function makeState(): ImportState {
   }
 }
 
-const activeTab = ref<'hentai20' | 'mangaboost'>('hentai20')
+const activeTab = ref<'hentai20' | 'mangaboost' | 'manhwamyanmar' | 'yotepya'>('hentai20')
 const h20 = reactive<ImportState>(makeState())
 const mb = reactive<ImportState>(makeState())
+const mm = reactive<ImportState>(makeState())
+const yt = reactive<ImportState>(makeState())
 
 // ── Hentai20 ──
 
@@ -555,5 +851,189 @@ async function mbImport() {
 
 function mbReset() {
   Object.assign(mb, makeState())
+}
+
+// ── ManhwaMyanmar ──
+
+async function mmPreview() {
+  if (!mm.url.trim()) return
+  mm.previewing = true
+  mm.previewError = ''
+  mm.preview = null
+  try {
+    const res = await api.post('/admin/import/manhwamyanmar/preview', { url: mm.url.trim() })
+    mm.preview = res.data
+    mm.selectedSlugs = new Set(res.data.chapters.map((c: PreviewChapter) => c.slug))
+  } catch (e: any) {
+    mm.previewError = e.response?.data?.error || e.message || 'Failed to fetch preview'
+  } finally {
+    mm.previewing = false
+  }
+}
+
+function mmToggleChapter(slug: string) {
+  const set = new Set(mm.selectedSlugs)
+  if (set.has(slug)) set.delete(slug)
+  else set.add(slug)
+  mm.selectedSlugs = set
+}
+
+function mmSelectAll() {
+  if (!mm.preview) return
+  mm.selectedSlugs = new Set(mm.preview.chapters.map(c => c.slug))
+}
+
+function mmSelectNone() { mm.selectedSlugs = new Set() }
+
+function mmSelectRange() {
+  if (!mm.preview) return
+  const from = mm.rangeFrom ?? 1
+  const to = mm.rangeTo ?? Infinity
+  mm.selectedSlugs = new Set(
+    mm.preview.chapters.filter(c => c.number >= from && c.number <= to).map(c => c.slug)
+  )
+}
+
+async function mmImport() {
+  if (!mm.preview || mm.selectedSlugs.size === 0) return
+  mm.importing = true
+  mm.importError = ''
+  mm.result = null
+  mm.logs = []
+  mm.logs.push({ msg: `Importing "${mm.preview.title}"...`, type: 'info' })
+  mm.logs.push({ msg: `Chapters selected: ${mm.selectedSlugs.size}`, type: 'info' })
+  try {
+    const res = await api.post('/admin/import/manhwamyanmar', {
+      url: mm.url.trim(),
+      selected_chapters: mm.preview!.chapters.filter(c => mm.selectedSlugs.has(c.slug)),
+      force: mm.force,
+    })
+    if (res.status === 202) {
+      const { job_id, series, total } = res.data
+      mm.logs.push({ msg: `✓ Series ready: ${series?.title} — running ${total} chapters in background...`, type: 'info' })
+      await new Promise<void>(resolve => {
+        const poll = setInterval(async () => {
+          try {
+            const st = await api.get(`/admin/import/status?job_id=${job_id}`)
+            const d = st.data
+            const progressMsg = `⏳ ${d.done}/${d.total} (${d.saved} saved, ${d.skipped} skipped${d.failed?.length > 0 ? `, ${d.failed.length} failed` : ''})`
+            const last = mm.logs[mm.logs.length - 1]
+            if (last?.msg.startsWith('⏳')) mm.logs[mm.logs.length - 1] = { msg: progressMsg, type: 'info' }
+            else mm.logs.push({ msg: progressMsg, type: 'info' })
+            if (!d.running) {
+              clearInterval(poll)
+              const failed: number[] = d.failed ?? []
+              mm.result = { series, chapters_saved: d.saved, chapters_skipped: d.skipped, chapters_failed: failed }
+              mm.logs.push({ msg: `✓ Done! ${d.saved} saved, ${d.skipped} skipped${failed.length > 0 ? `, ${failed.length} failed` : ''}`, type: failed.length > 0 ? 'error' : 'success' })
+              if (failed.length > 0) mm.logs.push({ msg: `✗ Failed: ${failed.map((n: number) => `Ch.${n}`).join(', ')}`, type: 'error' })
+              resolve()
+            }
+          } catch { clearInterval(poll); resolve() }
+        }, 3000)
+      })
+    }
+  } catch (e: any) {
+    const errMsg = e.response?.data?.error || e.message || 'Unknown error'
+    mm.importError = errMsg
+    mm.logs.push({ msg: `✗ ${errMsg}`, type: 'error' })
+  } finally {
+    mm.importing = false
+  }
+}
+
+function mmReset() {
+  Object.assign(mm, makeState())
+}
+
+// ── YotePya ──
+
+async function ytPreview() {
+  if (!yt.url.trim()) return
+  yt.previewing = true
+  yt.previewError = ''
+  yt.preview = null
+  try {
+    const res = await api.post('/admin/import/yotepya/preview', { url: yt.url.trim() })
+    yt.preview = res.data
+    yt.selectedSlugs = new Set(res.data.chapters.map((c: PreviewChapter) => c.slug))
+  } catch (e: any) {
+    yt.previewError = e.response?.data?.error || e.message || 'Failed to fetch preview'
+  } finally {
+    yt.previewing = false
+  }
+}
+
+function ytToggleChapter(slug: string) {
+  const set = new Set(yt.selectedSlugs)
+  if (set.has(slug)) set.delete(slug)
+  else set.add(slug)
+  yt.selectedSlugs = set
+}
+
+function ytSelectAll() {
+  if (!yt.preview) return
+  yt.selectedSlugs = new Set(yt.preview.chapters.map(c => c.slug))
+}
+
+function ytSelectNone() { yt.selectedSlugs = new Set() }
+
+function ytSelectRange() {
+  if (!yt.preview) return
+  const from = yt.rangeFrom ?? 1
+  const to = yt.rangeTo ?? Infinity
+  yt.selectedSlugs = new Set(
+    yt.preview.chapters.filter(c => c.number >= from && c.number <= to).map(c => c.slug)
+  )
+}
+
+async function ytImport() {
+  if (!yt.preview || yt.selectedSlugs.size === 0) return
+  yt.importing = true
+  yt.importError = ''
+  yt.result = null
+  yt.logs = []
+  yt.logs.push({ msg: `Importing "${yt.preview.title}"...`, type: 'info' })
+  yt.logs.push({ msg: `Chapters selected: ${yt.selectedSlugs.size}`, type: 'info' })
+  try {
+    const res = await api.post('/admin/import/yotepya', {
+      url: yt.url.trim(),
+      selected_chapters: yt.preview!.chapters.filter(c => yt.selectedSlugs.has(c.slug)),
+      force: yt.force,
+    })
+    if (res.status === 202) {
+      const { job_id, series, total } = res.data
+      yt.logs.push({ msg: `✓ Series ready: ${series?.title} — running ${total} chapters in background...`, type: 'info' })
+      await new Promise<void>(resolve => {
+        const poll = setInterval(async () => {
+          try {
+            const st = await api.get(`/admin/import/status?job_id=${job_id}`)
+            const d = st.data
+            const progressMsg = `⏳ ${d.done}/${d.total} (${d.saved} saved, ${d.skipped} skipped${d.failed?.length > 0 ? `, ${d.failed.length} failed` : ''})`
+            const last = yt.logs[yt.logs.length - 1]
+            if (last?.msg.startsWith('⏳')) yt.logs[yt.logs.length - 1] = { msg: progressMsg, type: 'info' }
+            else yt.logs.push({ msg: progressMsg, type: 'info' })
+            if (!d.running) {
+              clearInterval(poll)
+              const failed: number[] = d.failed ?? []
+              yt.result = { series, chapters_saved: d.saved, chapters_skipped: d.skipped, chapters_failed: failed }
+              yt.logs.push({ msg: `✓ Done! ${d.saved} saved, ${d.skipped} skipped${failed.length > 0 ? `, ${failed.length} failed` : ''}`, type: failed.length > 0 ? 'error' : 'success' })
+              if (failed.length > 0) yt.logs.push({ msg: `✗ Failed: ${failed.map((n: number) => `Ch.${n}`).join(', ')}`, type: 'error' })
+              resolve()
+            }
+          } catch { clearInterval(poll); resolve() }
+        }, 3000)
+      })
+    }
+  } catch (e: any) {
+    const errMsg = e.response?.data?.error || e.message || 'Unknown error'
+    yt.importError = errMsg
+    yt.logs.push({ msg: `✗ ${errMsg}`, type: 'error' })
+  } finally {
+    yt.importing = false
+  }
+}
+
+function ytReset() {
+  Object.assign(yt, makeState())
 }
 </script>
