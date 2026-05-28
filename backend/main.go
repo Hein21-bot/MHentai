@@ -10,6 +10,7 @@ import (
 	"mhentai-backend/internal/database"
 	"mhentai-backend/internal/router"
 	"mhentai-backend/internal/storage"
+	"mhentai-backend/internal/telegram"
 )
 
 func main() {
@@ -23,6 +24,7 @@ func main() {
 
 	database.Init()
 	storage.InitR2()
+	telegram.Init()
 	cron.StartAutoImport()
 
 	r := router.New(adminToken)

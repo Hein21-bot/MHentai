@@ -20,6 +20,7 @@ import (
 	"mhentai-backend/internal/repository"
 	"mhentai-backend/internal/scraper"
 	"mhentai-backend/internal/storage"
+	"mhentai-backend/internal/telegram"
 )
 
 var slugRe = regexp.MustCompile(`[^a-z0-9-]+`)
@@ -629,6 +630,7 @@ func AdminImport(c *gin.Context) {
 	seriesSlug := series.Slug
 	seriesChapterCount := series.ChapterCount
 	force := req.Force
+	isNew := newlyCreated
 	go func() {
 		defer func() {
 			importJobsMu.Lock()
@@ -679,6 +681,17 @@ func AdminImport(c *gin.Context) {
 		_ = repository.UpdateSeriesFields(bgCtx, series.ID, map[string]interface{}{
 			"chapter_count": seriesChapterCount + saved,
 		})
+		if isNew {
+			telegram.NotifyNewSeries(telegram.SeriesInfo{
+				Title:        series.Title,
+				Description:  series.Description,
+				CoverURL:     series.CoverURL,
+				ChapterCount: seriesChapterCount + saved,
+				Status:       series.Status,
+				Genres:       series.Genres,
+				Slug:         series.Slug,
+			})
+		}
 	}()
 
 	c.JSON(http.StatusAccepted, gin.H{
@@ -1097,6 +1110,7 @@ func AdminImportMangaBoost(c *gin.Context) {
 		}
 	}
 
+	mbNewlyCreated := false
 	if series == nil {
 		baseSlug := info.Slug
 		if baseSlug == "" {
@@ -1135,6 +1149,7 @@ func AdminImportMangaBoost(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("saving series: %v", err)})
 			return
 		}
+		mbNewlyCreated = true
 	} else {
 		mbMetaFields := map[string]interface{}{
 			"title":       info.Title,
@@ -1200,6 +1215,7 @@ func AdminImportMangaBoost(c *gin.Context) {
 	seriesSlug := series.Slug
 	seriesChapterCount := series.ChapterCount
 	force := req.Force
+	isMbNew := mbNewlyCreated
 	go func() {
 		defer func() {
 			importJobsMu.Lock()
@@ -1253,6 +1269,17 @@ func AdminImportMangaBoost(c *gin.Context) {
 		_ = repository.UpdateSeriesFields(bgCtx, series.ID, map[string]interface{}{
 			"chapter_count": seriesChapterCount + saved,
 		})
+		if isMbNew {
+			telegram.NotifyNewSeries(telegram.SeriesInfo{
+				Title:        series.Title,
+				Description:  series.Description,
+				CoverURL:     series.CoverURL,
+				ChapterCount: seriesChapterCount + saved,
+				Status:       series.Status,
+				Genres:       series.Genres,
+				Slug:         series.Slug,
+			})
+		}
 	}()
 
 	c.JSON(http.StatusAccepted, gin.H{
@@ -1386,6 +1413,15 @@ func AdminUploadSeriesCover(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("update series: %v", err)})
 		return
 	}
+
+	telegram.NotifyNewSeries(telegram.SeriesInfo{
+		Title:       s.Title,
+		Description: s.Description,
+		CoverURL:    url,
+		Status:      s.Status,
+		Genres:      s.Genres,
+		Slug:        s.Slug,
+	})
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "cover_url": url})
 }
