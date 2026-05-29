@@ -54,20 +54,38 @@
           </RouterLink>
 
           <!-- Backfill R2 -->
-          <div class="flex items-center gap-3 p-3 bg-yellow-600/10 border border-yellow-600/30 rounded-lg">
-            <svg class="w-5 h-5 text-yellow-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
-            <div class="flex-1 min-w-0">
-              <p class="text-white text-sm font-medium">Backfill Images → R2</p>
-              <p class="text-gray-500 text-xs">Upload all external chapter images to R2 storage</p>
-              <p v-if="backfill.job" class="text-yellow-400 text-xs mt-1 font-mono">
-                {{ backfill.job.running ? `⏳ ${backfill.job.done}/${backfill.job.total} (${backfill.job.saved} saved, ${backfill.job.failed} failed)` : `✓ Done — ${backfill.job.saved} saved, ${backfill.job.failed} failed` }}
-              </p>
-              <p v-if="backfill.error" class="text-red-400 text-xs mt-1">{{ backfill.error }}</p>
+          <div class="p-3 bg-yellow-600/10 border border-yellow-600/30 rounded-lg">
+            <div class="flex items-center gap-3">
+              <svg class="w-5 h-5 text-yellow-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+              <div class="flex-1 min-w-0">
+                <p class="text-white text-sm font-medium">Backfill Images → R2</p>
+                <p class="text-gray-500 text-xs">Upload all external chapter images to R2 storage</p>
+                <p v-if="backfill.job" class="text-yellow-400 text-xs mt-1 font-mono">
+                  {{ backfill.job.running ? `⏳ ${backfill.job.done}/${backfill.job.total} (${backfill.job.saved} saved, ${backfill.job.failed} failed)` : `✓ Done — ${backfill.job.saved} saved, ${backfill.job.failed} failed` }}
+                </p>
+                <p v-if="backfill.error" class="text-red-400 text-xs mt-1">{{ backfill.error }}</p>
+              </div>
+              <button @click="startBackfill" :disabled="backfill.running"
+                class="px-3 py-1.5 text-xs font-medium bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
+                {{ backfill.running ? 'Running...' : 'Start' }}
+              </button>
             </div>
-            <button @click="startBackfill" :disabled="backfill.running"
-              class="px-3 py-1.5 text-xs font-medium bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
-              {{ backfill.running ? 'Running...' : 'Start' }}
-            </button>
+
+            <!-- Failed chapters list -->
+            <div v-if="backfill.job && !backfill.job.running && backfill.job.failed_chapters?.length > 0" class="mt-3 border-t border-yellow-600/20 pt-3">
+              <p class="text-red-400 text-xs font-medium mb-2">{{ backfill.job.failed_chapters.length }} chapters failed — fix manually via Chapter Details:</p>
+              <div class="space-y-1 max-h-40 overflow-y-auto">
+                <RouterLink
+                  v-for="fc in backfill.job.failed_chapters"
+                  :key="fc.id"
+                  :to="`/series/${fc.series_id}`"
+                  class="flex items-center justify-between gap-2 px-2 py-1 bg-red-600/10 hover:bg-red-600/20 rounded text-xs transition-colors"
+                >
+                  <span class="text-red-300 font-mono truncate">{{ fc.slug }}</span>
+                  <span class="text-red-500 flex-shrink-0">{{ fc.failed_images }} img failed</span>
+                </RouterLink>
+              </div>
+            </div>
           </div>
         </div>
       </div>

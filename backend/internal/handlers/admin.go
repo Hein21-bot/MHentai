@@ -709,7 +709,7 @@ func AdminImportChapterImages(c *gin.Context) {
 	var req struct {
 		ChapterID  string `json:"chapter_id" binding:"required"`
 		ChapterURL string `json:"chapter_url" binding:"required"`
-		ProxyToR2  bool   `json:"proxy_to_r2"`
+		ProxyToR2  bool   `json:"proxy_to_r2"` // kept for backwards compat, ignored — R2 always used if configured
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -730,21 +730,44 @@ func AdminImportChapterImages(c *gin.Context) {
 		}
 	}
 
-	var images []string
-	if strings.Contains(req.ChapterURL, "mangaboost.com") {
-		images, _ = scraper.ScrapeMangaBoostChapterImages(req.ChapterURL)
-		if len(images) == 0 {
-			images = scrapeAndOptionallyProxy(c.Request.Context(), req.ChapterURL, seriesSlug, ch.Slug, req.ProxyToR2)
-		}
-	} else {
-		images = scrapeAndOptionallyProxy(c.Request.Context(), req.ChapterURL, seriesSlug, ch.Slug, req.ProxyToR2)
+	// Pick the right scraper based on source URL
+	var rawImages []string
+	switch {
+	case strings.Contains(req.ChapterURL, "manhwamyanmar.com") || strings.Contains(req.ChapterURL, "myanhwa.xyz"):
+		rawImages, _ = scraper.ScrapeManhwaMyamarChapterImages(req.ChapterURL)
+	case strings.Contains(req.ChapterURL, "yotepya.com"):
+		rawImages, _ = scraper.ScrapeYotepyaChapterImages(req.ChapterURL)
+	case strings.Contains(req.ChapterURL, "mangaboost.com"):
+		rawImages, _ = scraper.ScrapeMangaBoostChapterImages(req.ChapterURL)
+	default:
+		rawImages, _ = scraper.ScrapeChapterImages(req.ChapterURL)
 	}
-	if err := repository.UpdateChapterImages(c.Request.Context(), req.ChapterID, images, req.ChapterURL); err != nil {
+
+	// Upload to R2 if configured
+	inR2 := false
+	images := rawImages
+	if storage.R2 != nil && storage.R2.Enabled() && len(rawImages) > 0 {
+		uploaded := make([]string, 0, len(rawImages))
+		allOk := true
+		for i, imgURL := range rawImages {
+			key := storage.ImageKey(seriesSlug, ch.Slug, i, imgURL)
+			if u, err := storage.R2.UploadFromURL(c.Request.Context(), imgURL, key, refererForImageURL(imgURL)); err == nil {
+				uploaded = append(uploaded, u)
+			} else {
+				uploaded = append(uploaded, imgURL)
+				allOk = false
+			}
+		}
+		images = uploaded
+		inR2 = allOk
+	}
+
+	if err := repository.UpdateChapterImagesR2(c.Request.Context(), req.ChapterID, images, req.ChapterURL, inR2); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "images_count": len(images)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "images_count": len(images), "images_in_r2": inR2})
 }
 
 // AdminScrapeChapterList POST /api/admin/import/chapters
@@ -2066,12 +2089,21 @@ var (
 	backfillR2Mu       sync.RWMutex
 )
 
+type BackfillR2FailedChapter struct {
+	ID          string `json:"id"`
+	Slug        string `json:"slug"`
+	SeriesID    string `json:"series_id"`
+	SourceURL   string `json:"source_url"`
+	FailedImages int   `json:"failed_images"`
+}
+
 type BackfillR2Job struct {
-	Running  bool    `json:"running"`
-	Total    int     `json:"total"`
-	Done     int     `json:"done"`
-	Saved    int     `json:"saved"`
-	Failed   int     `json:"failed"`
+	Running        bool                      `json:"running"`
+	Total          int                       `json:"total"`
+	Done           int                       `json:"done"`
+	Saved          int                       `json:"saved"`
+	Failed         int                       `json:"failed"`
+	FailedChapters []BackfillR2FailedChapter `json:"failed_chapters"`
 }
 
 var backfillR2Job = &BackfillR2Job{}
@@ -2080,13 +2112,18 @@ var backfillR2Job = &BackfillR2Job{}
 func AdminBackfillR2Status(c *gin.Context) {
 	backfillR2Mu.RLock()
 	defer backfillR2Mu.RUnlock()
+	failedChapters := backfillR2Job.FailedChapters
+	if failedChapters == nil {
+		failedChapters = []BackfillR2FailedChapter{}
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"running":  backfillR2Job.Running,
-		"total":    backfillR2Job.Total,
-		"done":     backfillR2Job.Done,
-		"saved":    backfillR2Job.Saved,
-		"failed":   backfillR2Job.Failed,
-		"job_id":   backfillR2JobID,
+		"running":         backfillR2Job.Running,
+		"total":           backfillR2Job.Total,
+		"done":            backfillR2Job.Done,
+		"saved":           backfillR2Job.Saved,
+		"failed":          backfillR2Job.Failed,
+		"failed_chapters": failedChapters,
+		"job_id":          backfillR2JobID,
 	})
 }
 
@@ -2142,7 +2179,7 @@ func AdminBackfillR2(c *gin.Context) {
 
 		for _, ch := range chapters {
 			uploaded := make([]string, 0, len(ch.Images))
-			allOk := true
+			failedCount := 0
 			for i, imgURL := range ch.Images {
 				key := storage.ImageKey(ch.SeriesID, ch.Slug, i, imgURL)
 				referer := refererForImageURL(imgURL)
@@ -2150,14 +2187,22 @@ func AdminBackfillR2(c *gin.Context) {
 					uploaded = append(uploaded, u)
 				} else {
 					uploaded = append(uploaded, imgURL)
-					allOk = false
+					failedCount++
 				}
 			}
 
-			err := repository.UpdateChapterImagesR2(bgCtx, ch.ID, uploaded, "", allOk)
+			allOk := failedCount == 0
+			err := repository.UpdateChapterImagesR2(bgCtx, ch.ID, uploaded, ch.SourceURL, allOk)
 			backfillR2Mu.Lock()
-			if err != nil {
+			if err != nil || !allOk {
 				backfillR2Job.Failed++
+				backfillR2Job.FailedChapters = append(backfillR2Job.FailedChapters, BackfillR2FailedChapter{
+					ID:           ch.ID,
+					Slug:         ch.Slug,
+					SeriesID:     ch.SeriesID,
+					SourceURL:    ch.SourceURL,
+					FailedImages: failedCount,
+				})
 			} else {
 				backfillR2Job.Saved++
 			}
