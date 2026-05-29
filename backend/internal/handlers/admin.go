@@ -664,6 +664,9 @@ func AdminImport(c *gin.Context) {
 			}
 			if ch.URL != "" {
 				chapter.Images = scrapeAndOptionallyProxy(bgCtx, ch.URL, seriesSlug, chSlug, true)
+				if storage.R2 != nil && storage.R2.Enabled() {
+					chapter.ImagesInR2 = true
+				}
 				time.Sleep(500 * time.Millisecond)
 			}
 			importJobsMu.Lock()
@@ -1261,6 +1264,7 @@ func AdminImportMangaBoost(c *gin.Context) {
 							}
 						}
 						chapter.Images = uploaded
+						chapter.ImagesInR2 = true
 					} else {
 						chapter.Images = imgs
 					}
@@ -1733,6 +1737,7 @@ func AdminImportManhwaMyanmar(c *gin.Context) {
 							}
 						}
 						chapter.Images = uploaded
+						chapter.ImagesInR2 = true
 					} else {
 						chapter.Images = imgs
 					}
@@ -2013,6 +2018,7 @@ func AdminImportYotepya(c *gin.Context) {
 							}
 						}
 						chapter.Images = uploaded
+						chapter.ImagesInR2 = true
 					} else {
 						chapter.Images = imgs
 					}

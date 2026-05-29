@@ -43,8 +43,9 @@ type Chapter struct {
 	Slug      string   `dynamodbav:"slug"       json:"slug"`
 	Title     string   `dynamodbav:"title"      json:"title"`
 	Number    float64  `dynamodbav:"number"     json:"number"`
-	Images    []string `dynamodbav:"images"     json:"images,omitempty"`
-	Language  string   `dynamodbav:"language"   json:"language"` // "en" | "my"
+	Images     []string `dynamodbav:"images"      json:"images,omitempty"`
+	ImagesInR2 bool     `dynamodbav:"images_in_r2" json:"images_in_r2,omitempty"`
+	Language   string   `dynamodbav:"language"    json:"language"` // "en" | "my"
 	ViewCount int64    `dynamodbav:"view_count" json:"view_count"`
 	SourceURL string   `dynamodbav:"source_url" json:"source_url,omitempty"`
 	CreatedAt string   `dynamodbav:"created_at" json:"created_at"` // RFC3339
