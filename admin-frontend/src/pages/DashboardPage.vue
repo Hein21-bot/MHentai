@@ -52,6 +52,23 @@
               <p class="text-gray-500 text-xs">Edit, delete, update status</p>
             </div>
           </RouterLink>
+
+          <!-- Backfill R2 -->
+          <div class="flex items-center gap-3 p-3 bg-yellow-600/10 border border-yellow-600/30 rounded-lg">
+            <svg class="w-5 h-5 text-yellow-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+            <div class="flex-1 min-w-0">
+              <p class="text-white text-sm font-medium">Backfill Images → R2</p>
+              <p class="text-gray-500 text-xs">Upload all external chapter images to R2 storage</p>
+              <p v-if="backfill.job" class="text-yellow-400 text-xs mt-1 font-mono">
+                {{ backfill.job.running ? `⏳ ${backfill.job.done}/${backfill.job.total} (${backfill.job.saved} saved, ${backfill.job.failed} failed)` : `✓ Done — ${backfill.job.saved} saved, ${backfill.job.failed} failed` }}
+              </p>
+              <p v-if="backfill.error" class="text-red-400 text-xs mt-1">{{ backfill.error }}</p>
+            </div>
+            <button @click="startBackfill" :disabled="backfill.running"
+              class="px-3 py-1.5 text-xs font-medium bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
+              {{ backfill.running ? 'Running...' : 'Start' }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -59,12 +76,42 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import api from '@/services/api'
 
 const stats = ref<any>(null)
 const recent = ref<any[]>([])
 function imgError(e: Event) { (e.target as HTMLImageElement).style.display = 'none' }
+
+const backfill = ref<{ running: boolean; job: any; error: string }>({ running: false, job: null, error: '' })
+let backfillPoll: number | undefined
+
+async function startBackfill() {
+  backfill.value.error = ''
+  backfill.value.running = true
+  try {
+    await api.post('/admin/import/backfill-r2')
+    pollBackfill()
+  } catch (e: any) {
+    backfill.value.error = e.response?.data?.error || e.message || 'Failed'
+    backfill.value.running = false
+  }
+}
+
+function pollBackfill() {
+  backfillPoll = window.setInterval(async () => {
+    try {
+      const res = await api.get('/admin/import/backfill-r2/status')
+      backfill.value.job = res.data
+      if (!res.data.running) {
+        clearInterval(backfillPoll)
+        backfill.value.running = false
+      }
+    } catch { clearInterval(backfillPoll); backfill.value.running = false }
+  }, 3000)
+}
+
+onBeforeUnmount(() => { if (backfillPoll) clearInterval(backfillPoll) })
 
 onMounted(async () => {
   try {

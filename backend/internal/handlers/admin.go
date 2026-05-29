@@ -2059,3 +2059,114 @@ func AdminImportYotepya(c *gin.Context) {
 		"total":  len(ytToImport),
 	})
 }
+
+var (
+	backfillR2Running  = false
+	backfillR2JobID    = ""
+	backfillR2Mu       sync.RWMutex
+)
+
+type BackfillR2Job struct {
+	Running  bool    `json:"running"`
+	Total    int     `json:"total"`
+	Done     int     `json:"done"`
+	Saved    int     `json:"saved"`
+	Failed   int     `json:"failed"`
+}
+
+var backfillR2Job = &BackfillR2Job{}
+
+// AdminBackfillR2Status GET /api/admin/import/backfill-r2/status
+func AdminBackfillR2Status(c *gin.Context) {
+	backfillR2Mu.RLock()
+	defer backfillR2Mu.RUnlock()
+	c.JSON(http.StatusOK, gin.H{
+		"running":  backfillR2Job.Running,
+		"total":    backfillR2Job.Total,
+		"done":     backfillR2Job.Done,
+		"saved":    backfillR2Job.Saved,
+		"failed":   backfillR2Job.Failed,
+		"job_id":   backfillR2JobID,
+	})
+}
+
+// refererForImageURL returns the appropriate Referer header for a given image CDN URL.
+func refererForImageURL(imgURL string) string {
+	switch {
+	case strings.Contains(imgURL, "blogger.googleusercontent.com"):
+		return "https://yotepya.com/"
+	case strings.Contains(imgURL, "manhwamm.cloud") || strings.Contains(imgURL, "myanhwa.xyz") || strings.Contains(imgURL, "manhwamyanmar"):
+		return "https://adult.manhwamyanmar.com/"
+	case strings.Contains(imgURL, "hentai20.io") || strings.Contains(imgURL, "hentai1.io"):
+		return "https://hentai20.io/"
+	case strings.Contains(imgURL, "mangaboost"):
+		return "https://mangaboost.com/"
+	default:
+		return ""
+	}
+}
+
+// AdminBackfillR2 POST /api/admin/import/backfill-r2
+func AdminBackfillR2(c *gin.Context) {
+	if storage.R2 == nil || !storage.R2.Enabled() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "R2 storage not configured"})
+		return
+	}
+
+	backfillR2Mu.Lock()
+	if backfillR2Job.Running {
+		backfillR2Mu.Unlock()
+		c.JSON(http.StatusConflict, gin.H{"error": "backfill already running"})
+		return
+	}
+	backfillR2Job = &BackfillR2Job{Running: true}
+	backfillR2JobID = uuid.NewString()
+	backfillR2Mu.Unlock()
+
+	bgCtx := context.Background()
+	go func() {
+		defer func() {
+			backfillR2Mu.Lock()
+			backfillR2Job.Running = false
+			backfillR2Mu.Unlock()
+		}()
+
+		chapters, err := repository.ScanChaptersNotInR2(bgCtx)
+		if err != nil {
+			return
+		}
+
+		backfillR2Mu.Lock()
+		backfillR2Job.Total = len(chapters)
+		backfillR2Mu.Unlock()
+
+		for _, ch := range chapters {
+			uploaded := make([]string, 0, len(ch.Images))
+			allOk := true
+			for i, imgURL := range ch.Images {
+				key := storage.ImageKey(ch.SeriesID, ch.Slug, i, imgURL)
+				referer := refererForImageURL(imgURL)
+				if u, err := storage.R2.UploadFromURL(bgCtx, imgURL, key, referer); err == nil {
+					uploaded = append(uploaded, u)
+				} else {
+					uploaded = append(uploaded, imgURL)
+					allOk = false
+				}
+			}
+
+			err := repository.UpdateChapterImagesR2(bgCtx, ch.ID, uploaded, "", allOk)
+			backfillR2Mu.Lock()
+			if err != nil {
+				backfillR2Job.Failed++
+			} else {
+				backfillR2Job.Saved++
+			}
+			backfillR2Job.Done++
+			backfillR2Mu.Unlock()
+
+			time.Sleep(200 * time.Millisecond)
+		}
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{"job_id": backfillR2JobID, "message": "backfill started"})
+}

@@ -480,10 +480,15 @@ func UpdateChaptersLanguage(ctx context.Context, seriesID, language string) erro
 
 // UpdateChapterImages replaces the images list for a chapter and optionally saves the source URL.
 func UpdateChapterImages(ctx context.Context, id string, images []string, sourceURL string) error {
+	return UpdateChapterImagesR2(ctx, id, images, sourceURL, false)
+}
+
+func UpdateChapterImagesR2(ctx context.Context, id string, images []string, sourceURL string, inR2 bool) error {
 	av, _ := attributevalue.Marshal(images)
-	expr := "SET images = :imgs, updated_at = :now"
+	expr := "SET images = :imgs, images_in_r2 = :r2, updated_at = :now"
 	vals := map[string]types.AttributeValue{
 		":imgs": av,
+		":r2":   &types.AttributeValueMemberBOOL{Value: inR2},
 		":now":  &types.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
 	}
 	if sourceURL != "" {
@@ -499,6 +504,39 @@ func UpdateChapterImages(ctx context.Context, id string, images []string, source
 		ExpressionAttributeValues: vals,
 	})
 	return err
+}
+
+// ScanChaptersNotInR2 returns all chapters that have images but are not yet stored in R2.
+func ScanChaptersNotInR2(ctx context.Context) ([]*models.Chapter, error) {
+	var results []*models.Chapter
+	var lastKey map[string]types.AttributeValue
+
+	for {
+		input := &dynamodb.ScanInput{
+			TableName:        aws.String(database.TableChapters),
+			FilterExpression: aws.String("(attribute_not_exists(images_in_r2) OR images_in_r2 = :f) AND attribute_exists(images) AND size(images) > :zero"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":f":    &types.AttributeValueMemberBOOL{Value: false},
+				":zero": &types.AttributeValueMemberN{Value: "0"},
+			},
+			ExclusiveStartKey: lastKey,
+		}
+		out, err := database.Client.Scan(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range out.Items {
+			var ch models.Chapter
+			if err := attributevalue.UnmarshalMap(item, &ch); err == nil {
+				results = append(results, &ch)
+			}
+		}
+		lastKey = out.LastEvaluatedKey
+		if lastKey == nil {
+			break
+		}
+	}
+	return results, nil
 }
 
 // IncrementChapterViewCount atomically increments view_count.
