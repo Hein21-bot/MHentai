@@ -126,7 +126,7 @@ func uploadToR2(ctx context.Context, images []string, seriesSlug, chapterSlug st
 	result := make([]string, 0, len(images))
 	for i, imgURL := range images {
 		key := storage.ImageKey(seriesSlug, chapterSlug, i, imgURL)
-		if uploaded, err := storage.R2.UploadFromURL(ctx, imgURL, key); err == nil {
+		if uploaded, err := storage.R2.UploadFromURL(ctx, imgURL, key, "https://hentai20.io/"); err == nil {
 			result = append(result, uploaded)
 		} else {
 			result = append(result, imgURL)

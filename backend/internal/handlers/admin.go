@@ -536,7 +536,7 @@ func AdminImport(c *gin.Context) {
 		coverURL := info.CoverURL
 		if storage.R2 != nil && storage.R2.Enabled() && coverURL != "" {
 			key := storage.CoverKey(slug, coverURL)
-			if uploaded, err := storage.R2.UploadFromURL(c.Request.Context(), coverURL, key); err == nil {
+			if uploaded, err := storage.R2.UploadFromURL(c.Request.Context(), coverURL, key, "https://hentai20.io/"); err == nil {
 				coverURL = uploaded
 			}
 		}
@@ -1005,7 +1005,7 @@ func scrapeAndOptionallyProxy(ctx context.Context, chapterURL, seriesSlug, chapt
 	proxied := make([]string, 0, len(rawImages))
 	for i, imgURL := range rawImages {
 		key := storage.ImageKey(seriesSlug, chapterSlug, i, imgURL)
-		if uploaded, err := storage.R2.UploadFromURL(ctx, imgURL, key); err == nil {
+		if uploaded, err := storage.R2.UploadFromURL(ctx, imgURL, key, "https://hentai20.io/"); err == nil {
 			proxied = append(proxied, uploaded)
 		} else {
 			proxied = append(proxied, imgURL) // fall back to original URL on error
@@ -1128,7 +1128,7 @@ func AdminImportMangaBoost(c *gin.Context) {
 		coverURL := info.CoverURL
 		if storage.R2 != nil && storage.R2.Enabled() && coverURL != "" {
 			key := storage.CoverKey(slug, coverURL)
-			if uploaded, err := storage.R2.UploadFromURL(c.Request.Context(), coverURL, key); err == nil {
+			if uploaded, err := storage.R2.UploadFromURL(c.Request.Context(), coverURL, key, "https://mangaboost.com/"); err == nil {
 				coverURL = uploaded
 			}
 		}
@@ -1589,7 +1589,7 @@ func AdminImportManhwaMyanmar(c *gin.Context) {
 		coverURL := info.CoverURL
 		if storage.R2 != nil && storage.R2.Enabled() && coverURL != "" {
 			key := storage.CoverKey(slug, coverURL)
-			if uploaded, err := storage.R2.UploadFromURL(c.Request.Context(), coverURL, key); err == nil {
+			if uploaded, err := storage.R2.UploadFromURL(c.Request.Context(), coverURL, key, "https://adult.manhwamyanmar.com/"); err == nil {
 				coverURL = uploaded
 			}
 		}
@@ -1709,7 +1709,20 @@ func AdminImportManhwaMyanmar(c *gin.Context) {
 			if ch.URL != "" {
 				imgs, imgErr := scraper.ScrapeManhwaMyamarChapterImages(ch.URL)
 				if imgErr == nil && len(imgs) > 0 {
-					chapter.Images = imgs
+					if storage.R2 != nil && storage.R2.Enabled() {
+						uploaded := make([]string, 0, len(imgs))
+						for i, imgURL := range imgs {
+							key := storage.ImageKey(seriesSlug, chSlug, i, imgURL)
+							if u, err := storage.R2.UploadFromURL(bgCtx, imgURL, key, "https://adult.manhwamyanmar.com/"); err == nil {
+								uploaded = append(uploaded, u)
+							} else {
+								uploaded = append(uploaded, imgURL)
+							}
+						}
+						chapter.Images = uploaded
+					} else {
+						chapter.Images = imgs
+					}
 				}
 				time.Sleep(500 * time.Millisecond)
 			}
@@ -1856,7 +1869,7 @@ func AdminImportYotepya(c *gin.Context) {
 		coverURL := info.CoverURL
 		if storage.R2 != nil && storage.R2.Enabled() && coverURL != "" {
 			key := storage.CoverKey(slug, coverURL)
-			if uploaded, err := storage.R2.UploadFromURL(c.Request.Context(), coverURL, key); err == nil {
+			if uploaded, err := storage.R2.UploadFromURL(c.Request.Context(), coverURL, key, "https://yotepya.com/"); err == nil {
 				coverURL = uploaded
 			}
 		}
@@ -1976,7 +1989,20 @@ func AdminImportYotepya(c *gin.Context) {
 			if ch.URL != "" {
 				imgs, imgErr := scraper.ScrapeYotepyaChapterImages(ch.URL)
 				if imgErr == nil && len(imgs) > 0 {
-					chapter.Images = imgs
+					if storage.R2 != nil && storage.R2.Enabled() {
+						uploaded := make([]string, 0, len(imgs))
+						for i, imgURL := range imgs {
+							key := storage.ImageKey(seriesSlug, chSlug, i, imgURL)
+							if u, err := storage.R2.UploadFromURL(bgCtx, imgURL, key, "https://yotepya.com/"); err == nil {
+								uploaded = append(uploaded, u)
+							} else {
+								uploaded = append(uploaded, imgURL)
+							}
+						}
+						chapter.Images = uploaded
+					} else {
+						chapter.Images = imgs
+					}
 				}
 				time.Sleep(500 * time.Millisecond)
 			}

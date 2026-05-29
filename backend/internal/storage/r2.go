@@ -71,12 +71,15 @@ func (r *R2Store) Enabled() bool {
 }
 
 // UploadFromURL downloads an image from srcURL and uploads it to R2.
+// referer is sent as the Referer header; pass "" to omit it.
 // Returns the public URL of the uploaded object.
-func (r *R2Store) UploadFromURL(ctx context.Context, srcURL, key string) (string, error) {
+func (r *R2Store) UploadFromURL(ctx context.Context, srcURL, key, referer string) (string, error) {
 	// Download
 	req, _ := http.NewRequestWithContext(ctx, "GET", srcURL, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0")
-	req.Header.Set("Referer", "https://hentai20.io/")
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("download: %w", err)
