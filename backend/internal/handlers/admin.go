@@ -991,8 +991,8 @@ func AdminImportSelectedChapters(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "chapters_saved": saved})
 }
 
-// scrapeAndOptionallyProxy scrapes image URLs and optionally uploads them to R2.
-func scrapeAndOptionallyProxy(ctx context.Context, chapterURL, seriesSlug, chapterSlug string, proxyToR2 bool) []string {
+// scrapeAndProxy scrapes image URLs and uploads them to R2 if configured.
+func scrapeAndOptionallyProxy(ctx context.Context, chapterURL, seriesSlug, chapterSlug string, _ bool) []string {
 	rawImages, err := scraper.ScrapeChapterImages(chapterURL)
 	if err != nil {
 		return nil
