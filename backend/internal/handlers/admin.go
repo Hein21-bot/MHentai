@@ -998,7 +998,7 @@ func scrapeAndOptionallyProxy(ctx context.Context, chapterURL, seriesSlug, chapt
 		return nil
 	}
 
-	if !proxyToR2 || storage.R2 == nil || !storage.R2.Enabled() {
+	if storage.R2 == nil || !storage.R2.Enabled() {
 		return rawImages
 	}
 
@@ -1250,7 +1250,20 @@ func AdminImportMangaBoost(c *gin.Context) {
 			if ch.URL != "" {
 				imgs, imgErr := scraper.ScrapeMangaBoostChapterImages(ch.URL)
 				if imgErr == nil && len(imgs) > 0 {
-					chapter.Images = imgs
+					if storage.R2 != nil && storage.R2.Enabled() {
+						uploaded := make([]string, 0, len(imgs))
+						for i, imgURL := range imgs {
+							key := storage.ImageKey(seriesSlug, chSlug, i, imgURL)
+							if u, err := storage.R2.UploadFromURL(bgCtx, imgURL, key, "https://mangaboost.com/"); err == nil {
+								uploaded = append(uploaded, u)
+							} else {
+								uploaded = append(uploaded, imgURL)
+							}
+						}
+						chapter.Images = uploaded
+					} else {
+						chapter.Images = imgs
+					}
 				}
 				time.Sleep(500 * time.Millisecond)
 			}
